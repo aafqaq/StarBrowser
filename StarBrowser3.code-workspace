@@ -1,0 +1,22 @@
+{
+  "folders": [
+    { "path": "." }
+  ],
+  "settings": {
+    "extensions.ignoreRecommendations": false,
+    "typescript.tsdk": "node_modules/typescript/lib",
+    "editor.formatOnSave": true,
+    "files.exclude": {
+      "node_modules": true,
+      "dist": true,
+      "dist-renderer": true
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "vue.volar",
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode"
+    ]
+  }
+}

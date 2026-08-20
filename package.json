@@ -1,0 +1,54 @@
+{
+  "name": "starbrowser3",
+  "version": "1.7.0",
+  "description": "便携式会话隔离浏览器",
+  "type": "module",
+  "main": "main/electron.mjs",
+  "author": "StarBrowser",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder --win dir --x64 && node scripts/finalize-dist.mjs && node scripts/write-program-manifest.mjs",
+    "dist:dir": "npm run dist",
+    "test:update": "node scripts/test-update-core.mjs",
+    "test:update:integration": "node scripts/test-update-integration.mjs"
+  },
+  "devDependencies": {
+    "@vicons/ionicons5": "0.13.0",
+    "@vitejs/plugin-vue": "latest",
+    "concurrently": "latest",
+    "cross-env": "latest",
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3",
+    "naive-ui": "2.45.1",
+    "typescript": "5.9.3",
+    "vite": "8.2.1",
+    "vue": "3.5.41",
+    "vue-tsc": "3.3.10",
+    "wait-on": "latest"
+  },
+  "build": {
+    "appId": "com.starbrowser.desktop",
+    "productName": "StarBrowser",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main/**/*",
+      "dist-renderer/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/starbrowser.ico"
+    }
+  },
+  "dependencies": {
+    "perfect-scrollbar": "^1.5.6",
+    "yauzl": "^3.2.0"
+  }
+}

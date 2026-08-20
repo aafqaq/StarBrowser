@@ -1,0 +1,56 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit
+        run: npm audit --audit-level=high
+
+      - name: Test update safety core
+        run: npm run test:update
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build portable Windows folder
+        run: npm run dist
+
+      - name: Create clean portable ZIP
+        shell: pwsh
+        run: |
+          $archive = "StarBrowser-Windows-x64-v${{ github.run_number }}.zip"
+          Compress-Archive -LiteralPath (Get-ChildItem -LiteralPath dist | ForEach-Object FullName) -DestinationPath $archive -CompressionLevel Optimal
+          "ARCHIVE_NAME=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarBrowser-Windows-x64
+          path: ${{ env.ARCHIVE_NAME }}
+          if-no-files-found: error
+          retention-days: 14
+

@@ -1,0 +1,57 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tagVersion = "${{ github.ref_name }}".TrimStart('v')
+          if ($packageVersion -ne $tagVersion) { throw "package.json 版本 $packageVersion 与标签 $tagVersion 不一致" }
+
+      - name: Install and verify
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm run test:update
+          npm run typecheck
+
+      - name: Build portable Windows folder
+        run: npm run dist
+
+      - name: Create update ZIP and compatibility manifest
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $archive = "StarBrowser-Windows-x64-v$version.zip"
+          Compress-Archive -LiteralPath (Get-ChildItem -LiteralPath dist | ForEach-Object FullName) -DestinationPath $archive -CompressionLevel Optimal
+          node scripts/create-update-manifest.mjs $archive latest.json
+          "ARCHIVE_NAME=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" "$env:ARCHIVE_NAME" latest.json --title "StarBrowser ${{ github.ref_name }}" --generate-notes --verify-tag
+
