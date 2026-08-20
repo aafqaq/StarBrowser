@@ -137,6 +137,17 @@ function applyGuestPerformance(payload = {}) {
   }
 }
 
+function preconnectSession(sessionId, targetUrl) {
+  try {
+    const url = new URL(String(targetUrl || ''))
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+    configureSession(sessionId).preconnect({ url: url.origin, numSockets: 1 })
+    return true
+  } catch {
+    return false
+  }
+}
+
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
 function showWebContextMenu(contents, params) {
@@ -1377,7 +1388,7 @@ async function runSmokeCheck() {
       const result = {
         visible: Boolean(modal && rect && rect.width > 500 && rect.height > 300),
         insideViewport: Boolean(rect && rect.left >= 8 && rect.top >= 8 && rect.right <= innerWidth - 8 && rect.bottom <= innerHeight - 8),
-        versionShown: text.includes('v1.7.1') && text.includes('v9.9.9'),
+        versionShown: text.includes('v1.8.0') && text.includes('v9.9.9'),
         actionsShown: ['忽略此版本', '稍后', '下载更新'].every((label) => text.includes(label)),
         safetyShown: ['SHA-256 完整性校验', 'data 永不覆盖', '启动失败自动回滚', '兼容迁移清单'].every((label) => text.includes(label)),
         progressReady: Boolean(document.querySelector('[data-testid="update-modal"] .update-dialog'))
@@ -1389,8 +1400,9 @@ async function runSmokeCheck() {
     const guestContextMenuReady = Boolean(activeAfterSwitch && !activeAfterSwitch.isDestroyed() && configuredGuestIds.has(activeAfterSwitch.id))
     const spellcheckDisabled = Boolean(activeAfterSwitch && !activeAfterSwitch.isDestroyed() && !activeAfterSwitch.session.isSpellCheckerEnabled() && !mainWindow.webContents.session.isSpellCheckerEnabled())
     const rendererContextMenuReady = mainWindow.webContents.listenerCount('context-menu') > 0
+    const activationStability = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.activationStabilityCheck()`)
     const performancePolicy = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.performancePolicyCheck()`)
-    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, sessionSwitch, expiryBadge, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, sessionForm, inputLayer, memoAndChrome, favoritesUi, pluginUi, recycleOverlay, updateUi, performancePolicy }
+    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, sessionSwitch, expiryBadge, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, sessionForm, inputLayer, memoAndChrome, favoritesUi, pluginUi, recycleOverlay, updateUi, activationStability, performancePolicy }
     report.transferArchive = transferArchive
     report.browser = {
       engine: 'dom-webview',
@@ -1424,9 +1436,11 @@ async function runSmokeCheck() {
       pluginUi.visible && pluginUi.tabs && pluginUi.importReady && pluginUi.declarativeSafety && pluginUi.availableFieldRemoved &&
       recycleOverlay.visible && recycleOverlay.completeText && recycleOverlay.insideViewport && recycleOverlay.teleported &&
       updateUi.visible && updateUi.insideViewport && updateUi.versionShown && updateUi.actionsShown && updateUi.safetyShown && updateUi.progressReady &&
+      activationStability.guestStable && activationStability.navigationStable &&
       performancePolicy.lowLiveTabs === 1 && performancePolicy.lowLiveSessions === 1 && performancePolicy.lowDomGuests === 1 &&
       performancePolicy.mediumBudget === 10 && performancePolicy.highBudget === 24 && performancePolicy.ultraHighBudget === 48 &&
-      performancePolicy.fixedUnderCritical && performancePolicy.recommendedTier === 'balanced' && performancePolicy.lowVisualMode && performancePolicy.restoredMode &&
+      performancePolicy.fixedUnderCritical && performancePolicy.criticalRuntimeBudget === 1 && performancePolicy.constrainedRuntimeBudget === 12 &&
+      performancePolicy.recommendedTier === 'balanced' && performancePolicy.lowVisualMode && performancePolicy.restoredMode &&
       transferArchive.formatVersion === 1 && transferArchive.algorithmVersion === 1 && transferArchive.sessionName === '加密会话测试' &&
       transferArchive.cookieCount === 1 && transferArchive.credentialRestored && transferArchive.cacheExcluded && transferArchive.wrongPasswordRejected &&
       report.browser.guestIdStable && report.browser.videoSurfaceRemainedLive && report.browser.guestContextMenuReady && report.browser.rendererContextMenuReady && report.browser.spellcheckDisabled && !report.windowWasVisible
@@ -1475,13 +1489,17 @@ async function exitApplication() {
 function registerIpc() {
   ipcMain.handle('state:get', () => state)
   ipcMain.on('state:update', (_event, nextState) => {
+    const previousSessionIds = new Set((state?.sessions || []).map((item) => item.id))
     state = normalizeState(nextState)
     stateDirty = true
-    pluginService?.sessionsChanged()
+    const nextSessionIds = new Set(state.sessions.map((item) => item.id))
+    const sessionSetChanged = previousSessionIds.size !== nextSessionIds.size || [...previousSessionIds].some((id) => !nextSessionIds.has(id))
+    if (sessionSetChanged) pluginService?.sessionsChanged()
   })
   ipcMain.handle('browser:clear-session', (_event, sessionId) => clearSessionData(sessionId))
   ipcMain.handle('browser:export-session', (_event, payload) => exportSessionArchive(payload?.sessionId, payload?.password))
   ipcMain.handle('browser:import-session', (_event, payload) => importSessionArchive(payload?.password))
+  ipcMain.handle('browser:preconnect', (_event, payload) => preconnectSession(payload?.sessionId, payload?.url))
   ipcMain.on('browser:apply-performance', (event, payload) => {
     if (event.sender !== mainWindow?.webContents) return
     applyGuestPerformance(payload)

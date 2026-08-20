@@ -55,13 +55,16 @@ let maintenanceTimer: number | null = null
 let performanceMonitorTimer: number | null = null
 let retentionTrimTimer: number | null = null
 let sessionWarmupTimer: number | null = null
+let browserPersistTimer: number | null = null
 let warmingSessionId = ''
 let poorPerformanceSamples = 0
 let adviceDismissedUntil = 0
 let sessionScrollbar: PerfectScrollbar | null = null
 let trustedTimeBase = 0
 let trustedPerformanceBase = 0
+let lastPerformanceSignature = ''
 const liveInitialUrls = new Map<string, string>()
+const mainFrameNavigationCounts = new Map<string, number>()
 
 const tabDrag = reactive({
   id: '',
@@ -114,14 +117,15 @@ type PerformancePolicy = {
   effects: string
   hoverWarmupMs: number
   releaseDelayMs: number
+  fullHoverWarmup: boolean
 }
 
 const performancePolicies: Record<HardwareClass, PerformancePolicy> = {
-  'ultra-low': { maxLiveSessions: 1, maxLiveTabs: 1, maxTabsPerSession: 1, activeFrameRate: 24, backgroundFrameRate: 1, effects: '极简', hoverWarmupMs: 0, releaseDelayMs: 350 },
-  low: { maxLiveSessions: 1, maxLiveTabs: 2, maxTabsPerSession: 2, activeFrameRate: 30, backgroundFrameRate: 3, effects: '精简', hoverWarmupMs: 400, releaseDelayMs: 1_200 },
-  balanced: { maxLiveSessions: 3, maxLiveTabs: 10, maxTabsPerSession: 5, activeFrameRate: 50, backgroundFrameRate: 12, effects: '平衡', hoverWarmupMs: 200, releaseDelayMs: 20_000 },
-  high: { maxLiveSessions: 6, maxLiveTabs: 24, maxTabsPerSession: 8, activeFrameRate: 60, backgroundFrameRate: 24, effects: '完整', hoverWarmupMs: 100, releaseDelayMs: 90_000 },
-  'ultra-high': { maxLiveSessions: 12, maxLiveTabs: 48, maxTabsPerSession: 12, activeFrameRate: 60, backgroundFrameRate: 30, effects: '完整', hoverWarmupMs: 50, releaseDelayMs: 180_000 },
+  'ultra-low': { maxLiveSessions: 1, maxLiveTabs: 1, maxTabsPerSession: 1, activeFrameRate: 24, backgroundFrameRate: 1, effects: '极简', hoverWarmupMs: 0, releaseDelayMs: 350, fullHoverWarmup: false },
+  low: { maxLiveSessions: 1, maxLiveTabs: 2, maxTabsPerSession: 2, activeFrameRate: 30, backgroundFrameRate: 3, effects: '精简', hoverWarmupMs: 0, releaseDelayMs: 1_200, fullHoverWarmup: false },
+  balanced: { maxLiveSessions: 3, maxLiveTabs: 10, maxTabsPerSession: 5, activeFrameRate: 50, backgroundFrameRate: 12, effects: '平衡', hoverWarmupMs: 350, releaseDelayMs: 20_000, fullHoverWarmup: true },
+  high: { maxLiveSessions: 6, maxLiveTabs: 24, maxTabsPerSession: 8, activeFrameRate: 60, backgroundFrameRate: 24, effects: '完整', hoverWarmupMs: 160, releaseDelayMs: 90_000, fullHoverWarmup: true },
+  'ultra-high': { maxLiveSessions: 12, maxLiveTabs: 48, maxTabsPerSession: 12, activeFrameRate: 60, backgroundFrameRate: 30, effects: '完整', hoverWarmupMs: 80, releaseDelayMs: 180_000, fullHoverWarmup: true },
 }
 
 const themeOverrides: GlobalThemeOverrides = {
@@ -253,6 +257,17 @@ function persist() {
   if (state.value) api.state.update(cloneState())
 }
 
+function flushBrowserPersist() {
+  if (browserPersistTimer) window.clearTimeout(browserPersistTimer)
+  browserPersistTimer = null
+  persist()
+}
+
+function scheduleBrowserPersist() {
+  if (browserPersistTimer) window.clearTimeout(browserPersistTimer)
+  browserPersistTimer = window.setTimeout(flushBrowserPersist, 180)
+}
+
 function notify(message: string) {
   toast.value = message
   if (toastTimer.value) window.clearTimeout(toastTimer.value)
@@ -316,12 +331,31 @@ function removeLiveTab(tabId: string) {
   recentTabIds.value = recentTabIds.value.filter((id) => id !== tabId)
   readyTabIds.value = readyTabIds.value.filter((id) => id !== tabId)
   liveInitialUrls.delete(tabId)
+  mainFrameNavigationCounts.delete(tabId)
 }
 
 function touchRecent(list: string[], id: string) {
   const index = list.indexOf(id)
   if (index >= 0) list.splice(index, 1)
   list.unshift(id)
+}
+
+function runtimeLiveBudget(policy = currentPerformancePolicy.value) {
+  if (memoryStatus.value.level === 'critical') return 1
+  if (memoryStatus.value.level === 'constrained') return Math.max(1, Math.ceil(policy.maxLiveTabs * .5))
+  return policy.maxLiveTabs
+}
+
+function runtimeSessionBudget(policy = currentPerformancePolicy.value) {
+  if (memoryStatus.value.level === 'critical') return 1
+  if (memoryStatus.value.level === 'constrained') return Math.max(1, Math.ceil(policy.maxLiveSessions * .5))
+  return policy.maxLiveSessions
+}
+
+function runtimePerSessionBudget(policy = currentPerformancePolicy.value) {
+  if (memoryStatus.value.level === 'critical') return 1
+  if (memoryStatus.value.level === 'constrained') return Math.max(1, Math.ceil(policy.maxTabsPerSession * .5))
+  return policy.maxTabsPerSession
 }
 
 function trimLiveTabs() {
@@ -334,7 +368,9 @@ function trimLiveTabs() {
   recentTabIds.value = recentTabIds.value.filter((id, index, values) => sessionByTab.has(id) && values.indexOf(id) === index)
   if (activeSession.value) touchRecent(recentSessionIds.value, activeSession.value.id)
 
-  const allowedSessions = new Set(recentSessionIds.value.slice(0, policy.maxLiveSessions))
+  const maxLiveTabs = runtimeLiveBudget(policy)
+  const maxTabsPerSession = runtimePerSessionBudget(policy)
+  const allowedSessions = new Set(recentSessionIds.value.slice(0, runtimeSessionBudget(policy)))
   const liveSet = new Set(liveTabIds.value)
   const priority = [activeTab.value?.id || '', ...recentTabIds.value, ...liveTabIds.value].filter(Boolean)
   const keep: string[] = []
@@ -344,11 +380,19 @@ function trimLiveTabs() {
     const owner = sessionByTab.get(tabId)
     if (!owner || !allowedSessions.has(owner.id)) continue
     const count = perSession.get(owner.id) || 0
-    if (count >= policy.maxTabsPerSession || keep.length >= policy.maxLiveTabs) continue
+    if (count >= maxTabsPerSession || keep.length >= maxLiveTabs) continue
     keep.push(tabId)
     perSession.set(owner.id, count + 1)
   }
-  for (const tabId of liveTabIds.value) if (!keep.includes(tabId)) liveInitialUrls.delete(tabId)
+  const removed = liveTabIds.value.filter((tabId) => !keep.includes(tabId))
+  for (const tabId of removed) {
+    liveInitialUrls.delete(tabId)
+    mainFrameNavigationCounts.delete(tabId)
+  }
+  if (removed.length) {
+    const removedSet = new Set(removed)
+    readyTabIds.value = readyTabIds.value.filter((tabId) => !removedSet.has(tabId))
+  }
   liveTabIds.value = keep
 }
 
@@ -365,8 +409,12 @@ async function syncGuestPerformance() {
   await nextTick()
   const guestIds = liveTabIds.value.map(guestIdFor).filter((id) => id > 0)
   const policy = currentPerformancePolicy.value
+  const activeGuestId = activeTab.value ? guestIdFor(activeTab.value.id) : 0
+  const signature = `${activeGuestId}|${guestIds.join(',')}|${policy.activeFrameRate}|${policy.backgroundFrameRate}`
+  if (signature === lastPerformanceSignature) return
+  lastPerformanceSignature = signature
   api.browser.applyPerformance({
-    activeGuestId: activeTab.value ? guestIdFor(activeTab.value.id) : 0,
+    activeGuestId,
     guestIds,
     activeFrameRate: policy.activeFrameRate,
     backgroundFrameRate: policy.backgroundFrameRate,
@@ -384,7 +432,7 @@ function applyPerformanceEnvironment(immediate = true) {
 
 function ensureLiveTab(tab: BrowserTab, session = activeSession.value) {
   if (!liveTabIds.value.includes(tab.id)) {
-    if (liveTabIds.value.length >= currentPerformancePolicy.value.maxLiveTabs + 2) trimLiveTabs()
+    if (liveTabIds.value.length >= runtimeLiveBudget() + 2) trimLiveTabs()
     liveInitialUrls.set(tab.id, tab.url)
     liveTabIds.value.push(tab.id)
     readyTabIds.value = readyTabIds.value.filter((id) => id !== tab.id)
@@ -406,18 +454,20 @@ function releasePointerButtonFocus(event: PointerEvent) {
 
 function scheduleSessionWarmup(session: BrowserSession) {
   if (session.id === activeSession.value?.id) return
-  const delay = currentPerformancePolicy.value.hoverWarmupMs
-  if (!delay) return
   if (sessionWarmupTimer) window.clearTimeout(sessionWarmupTimer)
   warmingSessionId = session.id
+  const tab = session.tabs.find((item) => item.id === session.activeTabId) || session.tabs[0]
+  if (!tab) return
+  void api.browser.preconnect(session.id, tab.url)
+  const policy = currentPerformancePolicy.value
+  if (!policy.fullHoverWarmup) return
   sessionWarmupTimer = window.setTimeout(() => {
     sessionWarmupTimer = null
     if (warmingSessionId !== session.id || !state.value?.sessions.some((item) => item.id === session.id)) return
-    const tab = session.tabs.find((item) => item.id === session.activeTabId) || session.tabs[0]
-    if (tab) ensureLiveTab(tab, session)
+    ensureLiveTab(tab, session)
     if (retentionTrimTimer) window.clearTimeout(retentionTrimTimer)
     retentionTrimTimer = null
-  }, delay)
+  }, policy.hoverWarmupMs)
 }
 
 function cancelSessionWarmup(sessionId: string) {
@@ -433,7 +483,12 @@ async function refreshMemoryStatus() {
   await new Promise((resolve) => window.setTimeout(resolve, 120))
   const eventLoopLag = Math.max(0, performance.now() - probeStarted - 120)
   const next = await api.system.memoryStatus()
+  const previousLevel = memoryStatus.value.level
   memoryStatus.value = next
+  if (next.level !== 'normal' && next.level !== previousLevel) {
+    trimLiveTabs()
+    void syncGuestPerformance()
+  }
   if (document.hidden || Date.now() < adviceDismissedUntil) return
   const severity: MemoryPressureLevel | 'slow-ui' = next.level !== 'normal' ? next.level : eventLoopLag >= 180 ? 'slow-ui' : 'normal'
   if (severity === 'normal') {
@@ -491,12 +546,12 @@ async function activateSession(session: BrowserSession) {
   }
   state.value.activeSessionId = session.id
   touchRecent(recentSessionIds.value, session.id)
-  persist()
   await nextTick()
   if (!session.memoActive) {
     const tab = session.tabs.find((item) => item.id === session.activeTabId) || session.tabs[0]
     if (tab) await activateTab(tab)
   } else {
+    persist()
     void syncGuestPerformance()
   }
 }
@@ -1376,8 +1431,13 @@ function windowControl(action: 'minimize' | 'maximize' | 'close') {
 }
 
 function closeChoice(action: 'tray' | 'exit') {
+  if (browserPersistTimer) flushBrowserPersist()
   api.app.closeChoice({ action, remember: rememberClose.value })
   modalKind.value = ''
+}
+
+function flushHiddenBrowserState() {
+  if (document.hidden && browserPersistTimer) flushBrowserPersist()
 }
 
 function trustedNow() {
@@ -1463,9 +1523,19 @@ function tabForWebviewEvent(event: Event) {
 function patchWebviewTab(event: Event, patch: Partial<BrowserTab>) {
   const target = tabForWebviewEvent(event)
   if (!target) return
+  const changedKeys = (Object.keys(patch) as Array<keyof BrowserTab>).filter((key) => target.tab[key] !== patch[key])
+  if (!changedKeys.length) return
   Object.assign(target.tab, patch)
   if (target.tab.id === activeTab.value?.id && patch.url) address.value = patch.url
-  persist()
+  if (changedKeys.some((key) => key === 'url' || key === 'title' || key === 'favicon')) scheduleBrowserPersist()
+}
+
+function webviewNavigationStarted(event: Event) {
+  const detail = event as Event & { isMainFrame?: boolean }
+  if (detail.isMainFrame === false) return
+  const target = tabForWebviewEvent(event)
+  if (!target) return
+  mainFrameNavigationCounts.set(target.tab.id, (mainFrameNavigationCounts.get(target.tab.id) || 0) + 1)
 }
 
 function webviewReady(event: Event) {
@@ -1547,6 +1617,7 @@ async function webviewGone(event: Event) {
 
 onMounted(async () => {
   document.addEventListener('pointerup', releasePointerButtonFocus, true)
+  document.addEventListener('visibilitychange', flushHiddenBrowserState)
   const [loadedState, detectedProfile, loadedPlugins] = await Promise.all([api.state.get(), api.system.performanceProfile(), api.plugins.getState()])
   state.value = loadedState
   machineProfile.value = detectedProfile
@@ -1796,9 +1867,32 @@ onMounted(async () => {
         await activateTab(tab)
         return tab.id
       },
+      activationStabilityCheck: async () => {
+        const tab = activeTab.value
+        if (!tab) return { guestStable: false, navigationStable: false, beforeGuestId: 0, afterGuestId: 0, beforeNavigations: -1, afterNavigations: -1 }
+        await activateTab(tab)
+        await nextTick()
+        const beforeGuestId = await waitForGuestId(tab.id)
+        await new Promise((resolve) => window.setTimeout(resolve, 500))
+        const beforeNavigations = mainFrameNavigationCounts.get(tab.id) || 0
+        await activateTab(tab)
+        await activateTab(tab)
+        await activateTab(tab)
+        await new Promise((resolve) => window.setTimeout(resolve, 350))
+        const afterGuestId = guestIdFor(tab.id)
+        const afterNavigations = mainFrameNavigationCounts.get(tab.id) || 0
+        return {
+          guestStable: beforeGuestId > 0 && beforeGuestId === afterGuestId,
+          navigationStable: beforeNavigations === afterNavigations,
+          beforeGuestId,
+          afterGuestId,
+          beforeNavigations,
+          afterNavigations,
+        }
+      },
       performancePolicyCheck: async () => {
         const session = activeSession.value
-        if (!state.value || !session) return { lowLiveTabs: 99, lowLiveSessions: 99, lowDomGuests: 99, mediumBudget: 0, highBudget: 0, ultraHighBudget: 0, fixedUnderCritical: false, recommendedTier: '', lowVisualMode: false, restoredMode: false }
+        if (!state.value || !session) return { lowLiveTabs: 99, lowLiveSessions: 99, lowDomGuests: 99, mediumBudget: 0, highBudget: 0, ultraHighBudget: 0, fixedUnderCritical: false, criticalRuntimeBudget: 99, constrainedRuntimeBudget: 99, recommendedTier: '', lowVisualMode: false, restoredMode: false }
         const originalTier = state.value.settings.performanceTier
         const originalSource = state.value.settings.performanceSelectionSource
         const originalActiveTabId = session.activeTabId
@@ -1806,6 +1900,9 @@ onMounted(async () => {
         state.value.settings.performanceTier = 'high'
         memoryStatus.value = { ...originalMemoryStatus, level: 'critical' }
         const fixedUnderCritical = currentPerformancePolicy.value.maxLiveTabs === performancePolicies.high.maxLiveTabs
+        const criticalRuntimeBudget = runtimeLiveBudget()
+        memoryStatus.value = { ...originalMemoryStatus, level: 'constrained' }
+        const constrainedRuntimeBudget = runtimeLiveBudget()
         memoryStatus.value = originalMemoryStatus
         const created = [createTab(), createTab(), createTab(), createTab()]
         session.tabs.push(...created)
@@ -1838,6 +1935,8 @@ onMounted(async () => {
           highBudget: performancePolicies.high.maxLiveTabs,
           ultraHighBudget: performancePolicies['ultra-high'].maxLiveTabs,
           fixedUnderCritical,
+          criticalRuntimeBudget,
+          constrainedRuntimeBudget,
           recommendedTier: recommendedLowerTier('ultra-high', 'critical'),
           lowVisualMode,
           restoredMode: state.value.settings.performanceTier === originalTier && state.value.settings.performanceSelectionSource === originalSource,
@@ -1875,14 +1974,17 @@ watch(() => [state.value?.sessions.length || 0, sidebarCollapsed.value], async (
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerup', releasePointerButtonFocus, true)
+  document.removeEventListener('visibilitychange', flushHiddenBrowserState)
   if (maintenanceTimer) window.clearInterval(maintenanceTimer)
   if (performanceMonitorTimer) window.clearInterval(performanceMonitorTimer)
   if (retentionTrimTimer) window.clearTimeout(retentionTrimTimer)
   if (sessionWarmupTimer) window.clearTimeout(sessionWarmupTimer)
+  if (browserPersistTimer) flushBrowserPersist()
   if (toastTimer.value) window.clearTimeout(toastTimer.value)
   sessionScrollbar?.destroy()
   sessionScrollbar = null
   liveInitialUrls.clear()
+  mainFrameNavigationCounts.clear()
   document.body.classList.remove('performance-low-mode', 'performance-medium-mode', 'performance-high-mode')
   unsubscribe.forEach((dispose) => dispose())
   delete window.__starbrowserTest
@@ -2018,6 +2120,7 @@ onBeforeUnmount(() => {
                 allowpopups
                 webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes,backgroundThrottling=yes,spellcheck=no"
                 @dom-ready="webviewReady"
+                @did-start-navigation="webviewNavigationStarted"
                 @did-start-loading="patchWebviewTab($event, { loading: true })"
                 @did-stop-loading="webviewStopped"
                 @did-navigate="webviewNavigated"
@@ -2164,7 +2267,7 @@ onBeforeUnmount(() => {
             <p class="form-hint">被释放的页面再次切换时会重新载入，但 Cookie、本地存储、IndexedDB 与登录信息仍保存在隔离数据目录，不会因此删除。</p>
             <div class="settings-update-card">
               <span class="settings-update-icon"><n-icon><RocketOutline /></n-icon></span>
-              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.7.1' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
+              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.0' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
               <n-button size="small" secondary @click="openGithubProject"><template #icon><n-icon><StarOutline /></n-icon></template>GitHub</n-button>
               <n-button size="small" type="primary" :loading="updateInfo.phase === 'checking'" @click="checkForUpdatesManually">检查更新</n-button>
             </div>

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('starbrowser', {
     clearSession: (sessionId) => ipcRenderer.invoke('browser:clear-session', sessionId),
     exportSession: (sessionId, password) => ipcRenderer.invoke('browser:export-session', { sessionId, password }),
     importSession: (password) => ipcRenderer.invoke('browser:import-session', { password }),
+    preconnect: (sessionId, url) => ipcRenderer.invoke('browser:preconnect', { sessionId, url }),
     applyPerformance: (payload) => ipcRenderer.send('browser:apply-performance', payload),
     onNewWindow: (callback) => on('browser:new-window', callback),
     onCommand: (callback) => on('browser:command', callback),

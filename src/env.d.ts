@@ -43,7 +43,8 @@ declare global {
       showSettingsShowcase(): Promise<boolean>
       showPluginsShowcase(): Promise<boolean>
       activateTabAt(index: number): Promise<string>
-      performancePolicyCheck(): Promise<{ lowLiveTabs: number; lowLiveSessions: number; lowDomGuests: number; mediumBudget: number; highBudget: number; ultraHighBudget: number; fixedUnderCritical: boolean; recommendedTier: string; lowVisualMode: boolean; restoredMode: boolean }>
+      activationStabilityCheck(): Promise<{ guestStable: boolean; navigationStable: boolean; beforeGuestId: number; afterGuestId: number; beforeNavigations: number; afterNavigations: number }>
+      performancePolicyCheck(): Promise<{ lowLiveTabs: number; lowLiveSessions: number; lowDomGuests: number; mediumBudget: number; highBudget: number; ultraHighBudget: number; fixedUnderCritical: boolean; criticalRuntimeBudget: number; constrainedRuntimeBudget: number; recommendedTier: string; lowVisualMode: boolean; restoredMode: boolean }>
     }
   }
 

@@ -160,6 +160,7 @@ export interface ElectronApi {
     clearSession(sessionId: string): Promise<void>
     exportSession(sessionId: string, password: string): Promise<{ ok: boolean; canceled?: boolean; error?: string; code?: string; filePath?: string; stats?: { storageBytes?: number; fileCount?: number; cookieCount?: number; formatVersion?: number; algorithmVersion?: number } }>
     importSession(password: string): Promise<{ ok: boolean; canceled?: boolean; error?: string; code?: string; session?: BrowserSession; stats?: { storageBytes?: number; fileCount?: number; cookieCount?: number; formatVersion?: number; algorithmVersion?: number } }>
+    preconnect(sessionId: string, url: string): Promise<boolean>
     applyPerformance(payload: { activeGuestId: number; guestIds: number[]; activeFrameRate: number; backgroundFrameRate: number }): void
     onNewWindow(callback: (payload: { url: string }) => void): () => void
     onCommand(callback: (command: string) => void): () => void

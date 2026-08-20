@@ -259,9 +259,21 @@ export class PluginService {
     await fsp.mkdir(this.packagesRoot, { recursive: true })
     try { this.state = normalizeEngineState(JSON.parse(await fsp.readFile(this.stateFile, 'utf8'))) } catch { this.state = defaultEngineState() }
     await this.loadInstalledManifests()
-    await this.refreshCatalog(false).catch(() => {})
+    await this.loadCachedCatalog()
     for (const pluginId of Object.keys(this.state.installed)) this.schedule(pluginId, true)
     this.emit()
+    // The catalog is useful but must never sit on the application's startup path.
+    setTimeout(() => void this.refreshCatalog(false).catch(() => {}), 2_500).unref?.()
+  }
+
+  async loadCachedCatalog() {
+    for (const candidate of [this.catalogCacheFile, this.localCatalogFile]) {
+      try {
+        this.catalog = validateCatalog(JSON.parse(await fsp.readFile(candidate, 'utf8')))
+        return
+      } catch { /* Continue to the next safe local fallback. */ }
+    }
+    this.catalog = []
   }
 
   async loadInstalledManifests() {
