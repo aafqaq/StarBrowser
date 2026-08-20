@@ -1,11 +1,11 @@
 {
   "name": "starbrowser3",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "便携式会话隔离浏览器",
   "type": "module",
   "main": "main/electron.mjs",
-  "author": "StarBrowser",
-  "license": "MIT",
+  "author": "aafqaq",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "vite build",
@@ -45,7 +45,11 @@
     ],
     "win": {
       "icon": "assets/starbrowser.ico"
-    }
+    },
+    "extraFiles": [
+      { "from": "LICENSE", "to": "LICENSE-StarBrowser.txt" },
+      { "from": "THIRD_PARTY_NOTICES.md", "to": "THIRD_PARTY_NOTICES.md" }
+    ]
   },
   "dependencies": {
     "perfect-scrollbar": "^1.5.6",

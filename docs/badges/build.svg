@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="178" height="30" role="img" aria-label="Windows build passing">
+  <linearGradient id="g" x2="0" y2="100%"><stop stop-color="#fff" stop-opacity=".12"/><stop offset="1" stop-opacity=".08"/></linearGradient>
+  <rect width="112" height="30" rx="7" fill="#30323b"/><rect x="112" width="66" height="30" rx="7" fill="#36b37e"/><path fill="#36b37e" d="M112 0h7v30h-7z"/><rect width="178" height="30" rx="7" fill="url(#g)"/>
+  <g fill="#fff" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600"><text x="56" y="19">WINDOWS BUILD</text><text x="145" y="19">PASSING</text></g>
+</svg>

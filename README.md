@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="StarBrowser — 便携、隔离、现代的 Windows 多会话浏览器" width="100%" />
+  <img src="docs/banner.png" alt="StarBrowser — 便携、隔离、现代的 Windows 多会话浏览器" width="100%" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="https://img.shields.io/github/v/release/aafqaq/StarBrowser?style=for-the-badge&color=635bff&label=最新版" alt="最新版本" /></a>
-  <a href="https://github.com/aafqaq/StarBrowser/releases"><img src="https://img.shields.io/github/downloads/aafqaq/StarBrowser/total?style=for-the-badge&color=35a7ff&label=下载" alt="下载量" /></a>
-  <a href="https://github.com/aafqaq/StarBrowser/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/aafqaq/StarBrowser/build.yml?style=for-the-badge&label=Windows%20构建" alt="Windows 构建" /></a>
+  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/release.svg" alt="最新版本 v1.7.1" /></a>
+  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/download.svg" alt="下载 Windows x64" /></a>
+  <a href="https://github.com/aafqaq/StarBrowser/actions/workflows/build.yml"><img src="docs/badges/build.svg" alt="Windows 构建通过" /></a>
   <a href="https://github.com/aafqaq/StarBrowser/stargazers"><img src="https://img.shields.io/github/stars/aafqaq/StarBrowser?style=for-the-badge&color=ffb23f&label=Stars" alt="GitHub Stars" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/aafqaq/StarBrowser?style=for-the-badge&color=36b37e" alt="MIT License" /></a>
+  <a href="LICENSE"><img src="docs/badges/license.svg" alt="PolyForm Noncommercial License" /></a>
 </p>
 
 <p align="center">
@@ -21,6 +21,8 @@
   <a href="#三步开始使用">🚀 快速开始</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="#数据放在哪里">🛡️ 数据安全</a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#使用许可">📜 使用许可</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="https://github.com/aafqaq/StarBrowser/issues">💬 问题反馈</a>
 </p>
@@ -75,6 +77,17 @@
 
 > [!IMPORTANT]
 > 请勿直接在 ZIP 压缩包内运行，也不要把 `StarBrowser.exe` 单独移动到别处；它需要同级的 `resources`、`locales` 等运行文件。
+
+## 📜 使用许可
+
+StarBrowser 的原创代码、界面、文档和原创项目资源采用 [PolyForm Noncommercial 1.0.0](LICENSE) 源码公开许可：
+
+- ✅ 个人学习、研究、娱乐及其他非商业用途可以免费使用。
+- ✅ 非商业修改和再分发可以进行，但必须保留许可文本和作者声明。
+- 🔐 用于商业产品、收费服务、转售、变现分发或企业商业运营前，必须先取得作者书面授权。
+- 📮 商业授权可通过 GitHub 账号 [@aafqaq](https://github.com/aafqaq) 或本仓库 Issues 联系。
+
+Electron、Chromium、Vue、Naive UI 等第三方组件不适用上述商业限制，仍各自遵循原许可证；详见 [第三方许可声明](THIRD_PARTY_NOTICES.md)。这是非商业源码公开许可，不属于 OSI 定义的开源许可证。
 
 ## 🛡️ 数据放在哪里
 
@@ -152,7 +165,7 @@ StarBrowser 不提供云同步，也不会把会话、Cookie、备注、收藏�
 <details>
 <summary><b>Windows 提示“未知发布者”怎么办？</b></summary>
 
-开源项目暂未提供商业代码签名证书时，Windows SmartScreen 可能显示提醒。请只从本仓库 Releases 下载，并核对 Release 提供的 SHA-256 更新清单。不要使用来源不明的二次打包版本。
+源码公开项目暂未提供商业代码签名证书时，Windows SmartScreen 可能显示提醒。请只从本仓库 Releases 下载，并核对 Release 提供的 SHA-256 更新清单。不要使用来源不明的二次打包版本。
 </details>
 
 <details>
@@ -177,5 +190,5 @@ StarBrowser 不提供云同步，也不会把会话、Cookie、备注、收藏�
 ---
 
 <p align="center">
-  <sub>基于 Electron、Chromium、Vue 3 与 Naive UI · MIT License</sub>
+  <sub>基于 Electron、Chromium、Vue 3 与 Naive UI · PolyForm Noncommercial 1.0.0</sub>
 </p>

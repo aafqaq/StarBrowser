@@ -8,12 +8,7 @@
   <rect width="1440" height="460" rx="34" fill="url(#bg)"/>
   <circle cx="1180" cy="90" r="260" fill="url(#glow)"/><circle cx="210" cy="450" r="250" fill="url(#glow)" opacity=".55"/>
   <g opacity=".72" fill="#fff"><circle cx="92" cy="80" r="2"/><circle cx="180" cy="112" r="1.5"/><circle cx="320" cy="58" r="2"/><circle cx="520" cy="98" r="1.5"/><circle cx="1320" cy="315" r="2"/><circle cx="1240" cy="370" r="1.5"/><circle cx="1060" cy="48" r="1.5"/></g>
-  <g transform="translate(950 58)" filter="url(#shadow)">
-    <circle cx="165" cy="165" r="142" fill="none" stroke="url(#brand)" stroke-width="34" stroke-linecap="round" stroke-dasharray="650 245" transform="rotate(-24 165 165)"/>
-    <circle cx="165" cy="165" r="99" fill="none" stroke="url(#brand)" stroke-width="28" stroke-linecap="round" stroke-dasharray="430 192" transform="rotate(82 165 165)" opacity=".9"/>
-    <circle cx="165" cy="165" r="58" fill="#161936" stroke="#8c86ff" stroke-width="2"/>
-    <path d="M165 130l9 22 24 2-18 16 6 24-21-13-21 13 6-24-18-16 24-2z" fill="#fff" opacity=".94"/>
-  </g>
+  <image href="brand-logo.png" x="935" y="24" width="380" height="380" preserveAspectRatio="xMidYMid meet" filter="url(#shadow)"/>
   <g transform="translate(92 104)">
     <text x="0" y="76" fill="#fff" font-family="Segoe UI Variable,Segoe UI,sans-serif" font-size="72" font-weight="750" letter-spacing="-2">StarBrowser</text>
     <text x="4" y="125" fill="#b8b9d5" font-family="Microsoft YaHei UI,Segoe UI,sans-serif" font-size="23">便携、隔离、现代的 Windows 多会话浏览器</text>
@@ -22,6 +17,6 @@
       <rect x="163" width="150" height="42" rx="21" fill="#ffffff" fill-opacity=".1" stroke="#ffffff" stroke-opacity=".15"/><text x="238" y="27" fill="#e8e8ff" text-anchor="middle">会话完全隔离</text>
       <rect x="326" width="130" height="42" rx="21" fill="#ffffff" fill-opacity=".1" stroke="#ffffff" stroke-opacity=".15"/><text x="391" y="27" fill="#e8e8ff" text-anchor="middle">免安装</text>
     </g>
-    <text x="4" y="258" fill="#8588aa" font-family="Segoe UI Variable,Segoe UI,sans-serif" font-size="15">Windows 10 / 11 · Electron + Vue 3 · Open Source</text>
+    <text x="4" y="258" fill="#8588aa" font-family="Segoe UI Variable,Segoe UI,sans-serif" font-size="15">Windows 10 / 11 · Electron + Vue 3 · Source Available</text>
   </g>
 </svg>
