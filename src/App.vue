@@ -50,6 +50,7 @@ const pluginSettingsId = ref('')
 const pluginConfigDraft = ref<Record<string, string | number | boolean>>({})
 const pluginCenterBusy = ref('')
 const deletePluginConfig = ref(false)
+const openSessionMenuId = ref('')
 const logoUrl = new URL('../assets/starbrowser.ico', import.meta.url).href
 let maintenanceTimer: number | null = null
 let performanceMonitorTimer: number | null = null
@@ -279,9 +280,16 @@ function formatTime(value: string | null | undefined) {
   return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value))
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return ''
-  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
+function formatRelativeDays(value: string | null | undefined) {
+  const timestamp = Date.parse(String(value || ''))
+  if (!Number.isFinite(timestamp)) return '时间未知'
+  const now = clockNow.value || trustedNow() || Date.now()
+  const created = new Date(timestamp)
+  const current = new Date(now)
+  const createdDay = new Date(created.getFullYear(), created.getMonth(), created.getDate()).getTime()
+  const currentDay = new Date(current.getFullYear(), current.getMonth(), current.getDate()).getTime()
+  const days = Math.max(0, Math.floor((currentDay - createdDay) / 86_400_000))
+  return `${days}天前`
 }
 
 function releaseDelayLabel(milliseconds: number) {
@@ -640,6 +648,14 @@ function targetTabIndex(floatingLeft: number, listLeft: number, slotWidth: numbe
   return Math.max(0, Math.min(tabCount - 1, Math.round((floatingLeft - listLeft) / slotWidth)))
 }
 
+function crossedPreviousTab(floatingLeft: number, previousLeft: number, previousWidth: number) {
+  return floatingLeft < previousLeft + previousWidth / 2
+}
+
+function crossedNextTab(floatingRight: number, nextLeft: number, nextWidth: number) {
+  return floatingRight > nextLeft + nextWidth / 2
+}
+
 function resetTabDrag() {
   tabDragging.value = false
   tabDrag.id = ''
@@ -690,26 +706,22 @@ function moveTabPointer(event: PointerEvent) {
   tabDrag.left = Math.max(listRect.left, Math.min(event.clientX - tabDrag.offsetX, maximumLeft))
 
   const currentIndex = headerItems.value.findIndex((item) => item.id === tabDrag.id)
-  const floatingCenter = tabDrag.left + tabDrag.width / 2
   if (currentIndex > 0) {
     const previous = headerItems.value[currentIndex - 1]
     const element = list.querySelector<HTMLElement>(`.browser-tab[data-tab-id="${CSS.escape(previous.id)}"]`)
     const rect = element?.getBoundingClientRect()
-    if (rect && floatingCenter < rect.left + rect.width / 2) reorderHeader(currentIndex, currentIndex - 1)
-  } else if (currentIndex < headerItems.value.length - 1) {
-    const next = headerItems.value[currentIndex + 1]
+    if (rect && crossedPreviousTab(tabDrag.left, rect.left, rect.width)) {
+      reorderHeader(currentIndex, currentIndex - 1)
+      event.preventDefault()
+      return
+    }
+  }
+  const currentNow = headerItems.value.findIndex((item) => item.id === tabDrag.id)
+  if (currentNow >= 0 && currentNow < headerItems.value.length - 1) {
+    const next = headerItems.value[currentNow + 1]
     const element = list.querySelector<HTMLElement>(`.browser-tab[data-tab-id="${CSS.escape(next.id)}"]`)
     const rect = element?.getBoundingClientRect()
-    if (rect && floatingCenter > rect.left + rect.width / 2) reorderHeader(currentIndex, currentIndex + 1)
-  }
-  if (currentIndex > 0 && currentIndex < headerItems.value.length - 1) {
-    const currentNow = headerItems.value.findIndex((item) => item.id === tabDrag.id)
-    if (currentNow === currentIndex) {
-      const next = headerItems.value[currentIndex + 1]
-      const element = list.querySelector<HTMLElement>(`.browser-tab[data-tab-id="${CSS.escape(next.id)}"]`)
-      const rect = element?.getBoundingClientRect()
-      if (rect && floatingCenter > rect.left + rect.width / 2) reorderHeader(currentIndex, currentIndex + 1)
-    }
+    if (rect && crossedNextTab(tabDrag.left + tabDrag.width, rect.left, rect.width)) reorderHeader(currentNow, currentNow + 1)
   }
   event.preventDefault()
 }
@@ -862,6 +874,7 @@ function hideMemo() {
 
 async function openModal(kind: ModalKind) {
   if (!kind) return
+  openSessionMenuId.value = ''
   modalKind.value = kind
 }
 
@@ -941,6 +954,7 @@ function handleSidebarTool(key: string) {
 }
 
 async function handleSessionMenu(key: string, session: BrowserSession) {
+  openSessionMenuId.value = ''
   if (key === 'edit') await editSession(session)
   if (key === 'memo') {
     session.memoTabVisible = !session.memoTabVisible
@@ -958,6 +972,14 @@ async function handleSessionMenu(key: string, session: BrowserSession) {
     notify('浏览数据已重建')
   }
   if (key === 'delete') await moveToRecycle(session)
+}
+
+function updateSessionMenu(sessionId: string, visible: boolean) {
+  openSessionMenuId.value = visible ? sessionId : ''
+}
+
+function closeSessionMenu() {
+  openSessionMenuId.value = ''
 }
 
 async function moveToRecycle(session: BrowserSession) {
@@ -1227,9 +1249,32 @@ function installedPlugin(pluginId: string) {
   return pluginState.value.installed.find((item) => item.id === pluginId) || null
 }
 
-function pluginIcon(plugin: { icon: string }) {
-  if (plugin.icon === 'chatgpt') return ChatbubbleEllipsesOutline
+function pluginIcon(plugin: { id?: string; icon: string }) {
+  const icon = pluginState.value.catalog.find((item) => item.id === plugin.id)?.icon || plugin.icon
+  if (icon === 'chatgpt') return ChatbubbleEllipsesOutline
   return ExtensionPuzzleOutline
+}
+
+function pluginBadgeVisible(definition: InstalledPlugin['sessionBadges'][number], result: PluginEngineState['results'][string][string]) {
+  const condition = definition.visibleWhen
+  if (!condition) return true
+  const actual = Number(result.fields[condition.field])
+  const expected = Number(condition.value)
+  if (!Number.isFinite(actual) || !Number.isFinite(expected)) return false
+  if (condition.operator === 'lt') return actual < expected
+  if (condition.operator === 'lte') return actual <= expected
+  if (condition.operator === 'gt') return actual > expected
+  if (condition.operator === 'gte') return actual >= expected
+  return actual === expected
+}
+
+function pluginBadgeType(definition: InstalledPlugin['sessionBadges'][number], value: unknown) {
+  const numeric = Number(value)
+  if (Number.isFinite(numeric)) {
+    const threshold = definition.typeThresholds?.find((item) => numeric >= item.minimum)
+    if (threshold) return threshold.type
+  }
+  return definition.type || 'default'
 }
 
 function resetDistanceLabel(value: unknown) {
@@ -1256,6 +1301,7 @@ function sessionPluginBadges(session: BrowserSession) {
     if (!result) continue
     for (const [index, definition] of plugin.sessionBadges.entries()) {
       if (definition.whenStatus !== result.status) continue
+      if (!pluginBadgeVisible(definition, result)) continue
       const fieldValue = definition.field ? result.fields[definition.field] : undefined
       let label = definition.label || ''
       if (definition.format === 'reset-distance') label = resetDistanceLabel(fieldValue)
@@ -1264,7 +1310,7 @@ function sessionPluginBadges(session: BrowserSession) {
       badges.push({
         key: `${plugin.id}:${index}`,
         label,
-        type: definition.type || 'default',
+        type: pluginBadgeType(definition, fieldValue),
         title: definition.tooltipField ? String(nestedValue(result, definition.tooltipField) || '') : result.message || '',
       })
     }
@@ -1649,6 +1695,26 @@ onMounted(async () => {
         return changed
       },
       targetTabIndex,
+      mixedWidthTabCrossingCheck: () => ({
+        browserCanLeadMemo: crossedPreviousTab(100, 100, 88),
+        memoCanFollowBrowser: crossedNextTab(330, 250, 88),
+      }),
+      pluginBadgeRulesCheck: () => {
+        const definition: InstalledPlugin['sessionBadges'][number] = {
+          whenStatus: 'ok', field: 'remainingPercent', type: 'default',
+          typeThresholds: [
+            { minimum: 75, type: 'success' }, { minimum: 40, type: 'info' },
+            { minimum: 15, type: 'warning' }, { minimum: 0, type: 'error' },
+          ],
+        }
+        const resetDefinition: InstalledPlugin['sessionBadges'][number] = { whenStatus: 'ok', visibleWhen: { field: 'remainingPercent', operator: 'lt', value: 100 } }
+        const result = (remainingPercent: number) => ({ status: 'ok' as const, fields: { remainingPercent }, checkedAt: '', error: null })
+        return {
+          types: [90, 60, 25, 5].map((value) => pluginBadgeType(definition, value)),
+          freshCycleHidden: !pluginBadgeVisible(resetDefinition, result(100)),
+          usedCycleVisible: pluginBadgeVisible(resetDefinition, result(99.9)),
+        }
+      },
       getHeaderOrder: () => headerItems.value.map((item) => item.id),
       reorderHeaderItems: (fromIndex, toIndex) => {
         const changed = reorderHeader(fromIndex, toIndex)
@@ -1709,15 +1775,22 @@ onMounted(async () => {
       favoritesFlatCheck: () => Boolean(state.value && state.value.favoriteFolders.length === 0 && state.value.favorites.every((item) => item.folderId === '')),
       expiryBadgeCheck: async () => {
         const session = activeSession.value
-        if (!session) return { days: -1, visible: false }
+        if (!session) return { days: -1, visible: false, relativeTime: '', aligned: false, singleTagLine: false }
         const original = session.recycleDaysRemaining
         session.recycleDaysRemaining = 3
         await nextTick()
         const days = remainingDays(session) ?? -1
         const visible = [...document.querySelectorAll('.session-card.active .session-tags .n-tag')].some((element) => element.textContent?.includes(`剩余 ${days} 天`))
+        const time = document.querySelector<HTMLElement>('.session-card.active time')
+        const tags = document.querySelector<HTMLElement>('.session-card.active .session-tags')
+        const timeRect = time?.getBoundingClientRect()
+        const tagsRect = tags?.getBoundingClientRect()
+        const relativeTime = time?.textContent?.trim() || ''
+        const aligned = Boolean(timeRect && tagsRect && Math.abs((timeRect.top + timeRect.height / 2) - (tagsRect.top + tagsRect.height / 2)) <= 2)
+        const singleTagLine = Boolean(tags && getComputedStyle(tags).flexWrap === 'nowrap')
         session.recycleDaysRemaining = original
         await nextTick()
-        return { days, visible }
+        return { days, visible, relativeTime, aligned, singleTagLine }
       },
       neverRecycleCheck: async () => {
         if (!state.value) return false
@@ -2047,6 +2120,7 @@ onBeforeUnmount(() => {
       <button v-if="favoriteDragging && draggedFavorite" class="favorite-chip favorite-drag-preview" :style="draggedFavoriteStyle">
         <img v-if="draggedFavorite.favicon" :src="draggedFavorite.favicon" alt="" /><n-icon v-else><GlobeOutline /></n-icon><span>{{ draggedFavorite.title }}</span>
       </button>
+      <div v-if="openSessionMenuId" class="session-menu-dismiss-layer" aria-hidden="true" @pointerdown="closeSessionMenu" />
 
       <div class="workspace">
         <aside class="sidebar">
@@ -2057,17 +2131,21 @@ onBeforeUnmount(() => {
           <div ref="sessionList" class="session-list">
             <div v-for="session in state.sessions" :key="session.id" class="session-card" :class="{ active: session.id === activeSession?.id }" @pointerenter="scheduleSessionWarmup(session)" @pointerleave="cancelSessionWarmup(session.id)" @click="activateSession(session)">
               <template v-if="!sidebarCollapsed">
-                <div class="session-title" :title="session.name">{{ session.name }}</div>
-                <time>{{ formatDate(session.createdAt) }}</time>
-                <div class="session-actions" @click.stop>
-                  <n-button quaternary circle size="small" aria-label="打开备注" @click="showMemo(session)"><template #icon><n-icon><DocumentTextOutline /></n-icon></template></n-button>
-                  <n-dropdown trigger="click" placement="bottom-end" to="body" scrollable :max-width="280" :options="sessionMenuOptions(session)" @select="(key) => handleSessionMenu(String(key), session)">
-                    <n-button quaternary circle size="small" aria-label="更多操作"><template #icon><n-icon><EllipsisHorizontal /></n-icon></template></n-button>
-                  </n-dropdown>
+                <div class="session-card-main">
+                  <div class="session-title" :title="session.name">{{ session.name }}</div>
+                  <div class="session-actions" @click.stop>
+                    <n-button quaternary circle size="small" aria-label="打开备注" @click="showMemo(session)"><template #icon><n-icon><DocumentTextOutline /></n-icon></template></n-button>
+                    <n-dropdown :show="openSessionMenuId === session.id" :animated="false" trigger="click" placement="bottom-end" to="body" scrollable :max-width="280" :options="sessionMenuOptions(session)" @update:show="(visible) => updateSessionMenu(session.id, visible)" @select="(key) => handleSessionMenu(String(key), session)">
+                      <n-button quaternary circle size="small" aria-label="更多操作"><template #icon><n-icon><EllipsisHorizontal /></n-icon></template></n-button>
+                    </n-dropdown>
+                  </div>
                 </div>
-                <div v-if="remainingDays(session) !== null || sessionPluginBadges(session).length" class="session-tags">
-                  <n-tag v-for="badge in sessionPluginBadges(session)" :key="badge.key" size="small" round :type="badge.type" :title="badge.title">{{ badge.label }}</n-tag>
-                  <n-tag v-if="remainingDays(session) !== null" size="small" round type="warning">剩余 {{ remainingDays(session) }} 天</n-tag>
+                <div class="session-card-footer">
+                  <time>{{ formatRelativeDays(session.createdAt) }}</time>
+                  <div v-if="remainingDays(session) !== null || sessionPluginBadges(session).length" class="session-tags">
+                    <n-tag v-for="badge in sessionPluginBadges(session)" :key="badge.key" size="small" round :type="badge.type" :title="badge.title">{{ badge.label }}</n-tag>
+                    <n-tag v-if="remainingDays(session) !== null" size="small" round type="warning">剩余 {{ remainingDays(session) }} 天</n-tag>
+                  </div>
                 </div>
               </template>
               <span v-else class="session-avatar">{{ session.name.slice(0, 1).toUpperCase() }}</span>
@@ -2224,7 +2302,7 @@ onBeforeUnmount(() => {
               <div class="plugin-settings-head">
                 <n-button quaternary circle @click="pluginSettingsId = ''"><template #icon><n-icon><ArrowBackOutline /></n-icon></template></n-button>
                 <span class="plugin-icon"><n-icon><component :is="pluginIcon(selectedPluginSettings)" /></n-icon></span>
-                <div><strong>{{ selectedPluginSettings.name }}</strong><span>v{{ selectedPluginSettings.version }} · {{ selectedPluginSettings.publisher }}</span></div>
+                <div class="plugin-settings-meta"><strong>{{ selectedPluginSettings.name }}</strong><span>v{{ selectedPluginSettings.version }} · {{ selectedPluginSettings.publisher }}</span></div>
                 <n-button secondary :loading="selectedPluginSettings.running || pluginCenterBusy === `run:${selectedPluginSettings.id}`" @click="runPlugin(selectedPluginSettings.id)">立即更新</n-button>
               </div>
               <div class="plugin-settings-form">
@@ -2267,7 +2345,7 @@ onBeforeUnmount(() => {
             <p class="form-hint">被释放的页面再次切换时会重新载入，但 Cookie、本地存储、IndexedDB 与登录信息仍保存在隔离数据目录，不会因此删除。</p>
             <div class="settings-update-card">
               <span class="settings-update-icon"><n-icon><RocketOutline /></n-icon></span>
-              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.1' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
+              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.2' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
               <n-button size="small" secondary @click="openGithubProject"><template #icon><n-icon><StarOutline /></n-icon></template>GitHub</n-button>
               <n-button size="small" type="primary" :loading="updateInfo.phase === 'checking'" @click="checkForUpdatesManually">检查更新</n-button>
             </div>

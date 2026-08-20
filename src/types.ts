@@ -127,6 +127,8 @@ export interface InstalledPlugin extends PluginCatalogEntry {
     field?: string
     format?: string
     type?: 'default' | 'success' | 'warning' | 'error' | 'info'
+    typeThresholds?: Array<{ minimum: number; type: 'default' | 'success' | 'warning' | 'error' | 'info' }>
+    visibleWhen?: { field: string; operator: 'lt' | 'lte' | 'gt' | 'gte' | 'eq'; value: number }
     tooltipField?: string
   }>
   config: Record<string, string | number | boolean>

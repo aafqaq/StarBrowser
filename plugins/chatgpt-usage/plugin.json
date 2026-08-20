@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "chatgpt-usage",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "ChatGPT 用量展示",
   "description": "自动识别打开过 chatgpt.com 的隔离会话，不创建网页标签，直接使用该会话的登录凭证读取非免费账号用量与重置时间。",
   "publisher": "StarBrowser",
@@ -65,13 +65,20 @@
         "whenStatus": "ok",
         "field": "remainingPercent",
         "format": "剩余 {value}%",
-        "type": "success"
+        "type": "default",
+        "typeThresholds": [
+          { "minimum": 75, "type": "success" },
+          { "minimum": 40, "type": "info" },
+          { "minimum": 15, "type": "warning" },
+          { "minimum": 0, "type": "error" }
+        ]
       },
       {
         "whenStatus": "ok",
         "field": "resetAt",
         "format": "reset-distance",
-        "type": "info"
+        "type": "info",
+        "visibleWhen": { "field": "remainingPercent", "operator": "lt", "value": 100 }
       },
       {
         "whenStatus": "error",

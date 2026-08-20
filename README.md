@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/release.svg" alt="最新版本 v1.8.1" /></a>
+  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/release.svg" alt="最新版本 v1.8.2" /></a>
   <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/download.svg" alt="下载 Windows x64" /></a>
   <a href="https://github.com/aafqaq/StarBrowser/actions/workflows/build.yml"><img src="docs/badges/build.svg" alt="Windows 构建通过" /></a>
   <a href="https://github.com/aafqaq/StarBrowser/stargazers"><img src="https://img.shields.io/github/stars/aafqaq/StarBrowser?style=for-the-badge&color=ffb23f&label=Stars" alt="GitHub Stars" /></a>

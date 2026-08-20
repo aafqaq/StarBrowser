@@ -155,9 +155,12 @@ button, input, textarea { font: inherit; }
 .session-card {
   position: relative;
   width: 100%;
-  min-height: 84px;
+  min-height: 78px;
+  display: grid;
+  align-content: center;
+  gap: 10px;
   margin-bottom: 8px;
-  padding: 13px 13px 10px;
+  padding: 11px 12px;
   background: transparent;
   border: 0 !important;
   outline: 0;
@@ -170,12 +173,15 @@ button, input, textarea { font: inherit; }
 .session-card:focus-visible { outline: 0; }
 .session-card:hover { background: rgba(255,255,255,.75); box-shadow: inset 0 0 0 1px #e5e6ed; }
 .session-card.active { background: #eeecff; box-shadow: inset 0 0 0 1px #d8d4ff, 0 6px 18px rgba(64,56,160,.06); }
-.session-title { width: calc(100% - 54px); max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
-.session-tags { position: absolute; right: 11px; bottom: 10px; max-width: calc(100% - 94px); display: flex; align-items: center; justify-content: flex-end; gap: 4px; overflow: hidden; }
+.session-card-main { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.session-title { min-width: 0; max-width: none; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+.session-card-footer { min-width: 0; min-height: 20px; display: flex; align-items: center; gap: 7px; }
+.session-tags { min-width: 0; flex: 1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 4px; overflow: hidden; }
 .session-tags .n-tag { height: 20px; min-width: 0; padding: 0 6px; font-size: 9px; white-space: nowrap; }
-.session-card time { position: absolute; left: 13px; bottom: 13px; color: #7d8290; font-size: 11px; }
-.session-actions { position: absolute; right: 8px; top: 7px; display: flex; gap: 0; }
+.session-card time { flex: 0 0 auto; color: #7d8290; font-size: 10px; line-height: 20px; white-space: nowrap; }
+.session-actions { flex: 0 0 auto; display: flex; gap: 0; }
 .session-actions .n-button { width: 25px; height: 25px; font-size: 13px; }
+.session-menu-dismiss-layer { position: fixed; z-index: 1900; inset: 0; background: transparent; }
 .collapsed .session-card { width: 44px; min-height: 44px; height: 44px; margin: 0 auto 7px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 14px; }
 .collapsed .session-list { width: 100%; margin-right: 0; padding-right: 0; overflow-x: hidden !important; }
 .collapsed .session-list > .ps__rail-y { display: none !important; }
@@ -311,9 +317,10 @@ button, input, textarea { font: inherit; }
 .plugin-card-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
 .plugin-card-actions.horizontal { flex-wrap: wrap; }
 .plugin-settings-head { display: grid; grid-template-columns: 34px 44px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid #ececf2; }
-.plugin-settings-head > div { min-width: 0; display: grid; gap: 3px; }
+.plugin-settings-head > .plugin-settings-meta { min-width: 0; display: grid; gap: 3px; }
 .plugin-settings-head strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.plugin-settings-head span { color: #858a96; font-size: 10px; }
+.plugin-settings-head .plugin-settings-meta span { color: #858a96; font-size: 10px; }
+.plugin-settings-head > .plugin-icon { width: 40px; height: 40px; color: #5850db; font-size: 20px; }
 .plugin-settings-form { display: grid; gap: 10px; }
 .plugin-settings-form > label { min-height: 54px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); align-items: center; gap: 18px; padding: 10px 12px; background: #f8f8fb; border: 1px solid #e9eaf0; border-radius: 12px; }
 .plugin-settings-form > label > span { min-width: 0; display: grid; gap: 3px; }

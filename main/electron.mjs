@@ -1130,6 +1130,7 @@ async function runSmokeCheck() {
     const tabCountAfterCreate = await mainWindow.webContents.executeJavaScript(`document.querySelectorAll('.browser-tab:not(.memo-tab):not(.tab-drag-preview)').length`)
     const sessionSwitch = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.sessionSwitchTabOverlap()`)
     const expiryBadge = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.expiryBadgeCheck()`)
+    const mixedWidthTabCrossing = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.mixedWidthTabCrossingCheck()`)
     const neverRecyclePreserved = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.neverRecycleCheck()`)
     const reorder = await mainWindow.webContents.executeJavaScript(`(async () => {
       const before = window.__starbrowserTest?.getTabOrder() || []
@@ -1158,9 +1159,19 @@ async function runSmokeCheck() {
         visible: Boolean(rect && rect.width > 80 && rect.height > 40),
         insideViewport: Boolean(rect && rect.left >= 4 && rect.top >= 4 && rect.right <= innerWidth - 4 && rect.bottom <= innerHeight - 4),
         teleported: Boolean(menu && menu.parentElement?.closest('.modal-card, .sidebar') === null),
+        dismissLayer: Boolean(document.querySelector('.session-menu-dismiss-layer')),
+        menuAboveDismissLayer: Boolean(rect && document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('.n-dropdown-menu')),
         rect: rect ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } : null
       }
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      document.querySelector('.session-menu-dismiss-layer')?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      result.dismissLayerRemoved = !document.querySelector('.session-menu-dismiss-layer')
+      await new Promise((resolve) => setTimeout(resolve, 420))
+      result.menuHidden = ![...document.querySelectorAll('.n-dropdown-menu')].some((element) => {
+        const bounds = element.getBoundingClientRect()
+        return bounds.width > 0 && bounds.height > 0
+      })
+      result.dismissed = result.dismissLayerRemoved && result.menuHidden
       return result
     })()`)
 
@@ -1309,6 +1320,11 @@ async function runSmokeCheck() {
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const after = window.__starbrowserTest?.getHeaderOrder() || []
       const dom = [...document.querySelectorAll('.browser-tab[data-tab-id]:not(.tab-drag-preview)')].map((element) => element.dataset.tabId)
+      const firstBrowserIndex = after.findIndex((id) => id !== '__memo__')
+      const browserChanged = firstBrowserIndex > 0 ? window.__starbrowserTest?.reorderHeaderItems(firstBrowserIndex, 0) : true
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const browserFirst = window.__starbrowserTest?.getHeaderOrder() || []
+      const browserFirstDom = [...document.querySelectorAll('.browser-tab[data-tab-id]:not(.tab-drag-preview)')].map((element) => element.dataset.tabId)
       const dragSpace = document.querySelector('.window-drag-space')
       const titlebar = document.querySelector('.titlebar')
       return {
@@ -1318,6 +1334,8 @@ async function runSmokeCheck() {
         after,
         dom,
         memoMoved: after[0] === '__memo__' && JSON.stringify(after) === JSON.stringify(dom),
+        browserChanged,
+        browserCanLeadMemo: browserFirst[0] !== '__memo__' && browserFirst[1] === '__memo__' && JSON.stringify(browserFirst) === JSON.stringify(browserFirstDom),
         nativeDragRegion: getComputedStyle(dragSpace).webkitAppRegion === 'drag' && getComputedStyle(titlebar).webkitAppRegion === 'drag'
       }
     })()`)
@@ -1342,13 +1360,25 @@ async function runSmokeCheck() {
       const modal = document.querySelector('[data-testid="plugins-modal"]')
       const rect = modal?.getBoundingClientRect()
       const text = modal?.textContent || ''
+      const centerIcon = modal?.querySelector('.plugin-card .plugin-icon')
+      const mockSettingsHead = document.createElement('div')
+      mockSettingsHead.className = 'plugin-settings-head'
+      const settingsIcon = centerIcon?.cloneNode(true)
+      if (settingsIcon) mockSettingsHead.append(settingsIcon)
+      document.body.append(mockSettingsHead)
+      const centerStyle = centerIcon ? getComputedStyle(centerIcon) : null
+      const settingsStyle = settingsIcon ? getComputedStyle(settingsIcon) : null
+      const badgeRules = window.__starbrowserTest?.pluginBadgeRulesCheck()
       const result = {
         visible: Boolean(rect && rect.width > 650 && rect.height > 400),
         tabs: text.includes('全部插件') && text.includes('已安装'),
         importReady: text.includes('导入 JSON'),
         declarativeSafety: text.includes('不能执行任意代码'),
-        availableFieldRemoved: !text.includes('可用时间')
+        availableFieldRemoved: !text.includes('可用时间'),
+        iconConsistent: Boolean(centerStyle && settingsStyle && centerStyle.width === settingsStyle.width && centerStyle.height === settingsStyle.height && centerStyle.color === settingsStyle.color && centerStyle.fontSize === settingsStyle.fontSize),
+        badgeRules
       }
+      mockSettingsHead.remove()
       document.querySelector('[data-testid="plugins-modal"] .n-card-header__extra button')?.click()
       return result
     })()`)
@@ -1388,7 +1418,7 @@ async function runSmokeCheck() {
       const result = {
         visible: Boolean(modal && rect && rect.width > 500 && rect.height > 300),
         insideViewport: Boolean(rect && rect.left >= 8 && rect.top >= 8 && rect.right <= innerWidth - 8 && rect.bottom <= innerHeight - 8),
-        versionShown: text.includes('v1.8.1') && text.includes('v9.9.9'),
+        versionShown: text.includes('v1.8.2') && text.includes('v9.9.9'),
         actionsShown: ['忽略此版本', '稍后', '下载更新'].every((label) => text.includes(label)),
         safetyShown: ['SHA-256 完整性校验', 'data 永不覆盖', '启动失败自动回滚', '兼容迁移清单'].every((label) => text.includes(label)),
         progressReady: Boolean(document.querySelector('[data-testid="update-modal"] .update-dialog'))
@@ -1402,7 +1432,7 @@ async function runSmokeCheck() {
     const rendererContextMenuReady = mainWindow.webContents.listenerCount('context-menu') > 0
     const activationStability = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.activationStabilityCheck()`)
     const performancePolicy = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.performancePolicyCheck()`)
-    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, sessionSwitch, expiryBadge, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, sessionForm, inputLayer, memoAndChrome, favoritesUi, pluginUi, recycleOverlay, updateUi, activationStability, performancePolicy }
+    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, sessionSwitch, expiryBadge, mixedWidthTabCrossing, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, sessionForm, inputLayer, memoAndChrome, favoritesUi, pluginUi, recycleOverlay, updateUi, activationStability, performancePolicy }
     report.transferArchive = transferArchive
     report.browser = {
       engine: 'dom-webview',
@@ -1421,9 +1451,9 @@ async function runSmokeCheck() {
       initial.sessionCard?.borderWidth === 0 && initial.sessionCard?.outlineWidth === 0 &&
       initial.scrollbar?.rightGap >= 3 && initial.scrollbar?.rightGap <= 8 && initial.scrollbar?.railWidth >= 5 &&
       buttonFocus.focusedBeforePointerRelease && buttonFocus.pointerFocusReleased && buttonFocus.keyboardFocusPreserved &&
-      tabCountAfterCreate === initial.tabCount + 1 && sessionSwitch?.noOverlap && expiryBadge?.days === 3 && expiryBadge?.visible && neverRecyclePreserved && reorder.changed &&
+      tabCountAfterCreate === initial.tabCount + 1 && sessionSwitch?.noOverlap && expiryBadge?.days === 3 && expiryBadge?.visible && /^\d+天前$/.test(expiryBadge?.relativeTime || '') && expiryBadge?.aligned && expiryBadge?.singleTagLine && mixedWidthTabCrossing?.browserCanLeadMemo && mixedWidthTabCrossing?.memoCanFollowBrowser && neverRecyclePreserved && reorder.changed &&
       reorder.before[0] === reorder.after[1] && JSON.stringify(reorder.after) === JSON.stringify(reorder.dom) &&
-      JSON.stringify(reorder.targets) === JSON.stringify([0, 2, 3]) && sessionMenuOverlay.visible && sessionMenuOverlay.insideViewport && sessionMenuOverlay.teleported &&
+      JSON.stringify(reorder.targets) === JSON.stringify([0, 2, 3]) && sessionMenuOverlay.visible && sessionMenuOverlay.insideViewport && sessionMenuOverlay.teleported && sessionMenuOverlay.dismissLayer && sessionMenuOverlay.menuAboveDismissLayer && sessionMenuOverlay.dismissed &&
       modal.settingsVisible && modal.performanceSelect && modal.updateSettings && settingsSelectOverlay.modalInsideViewport && settingsSelectOverlay.modalContentScrollable &&
       settingsSelectOverlay.visible && settingsSelectOverlay.insideViewport && settingsSelectOverlay.teleported &&
       sessionForm.sessionModalVisible && sessionForm.availableFieldRemoved &&
@@ -1431,9 +1461,9 @@ async function runSmokeCheck() {
       !modal.snapshotPresent && modal.activeWebviewVisible && modal.webviewCount === guestBefore.count &&
       inputLayer.before.allHitsActiveWebview && inputLayer.before.onlyOneInputView && inputLayer.before.backgroundViewsOutOfLayout &&
       inputLayer.afterSwitch.allHitsActiveWebview && inputLayer.afterSwitch.onlyOneInputView && inputLayer.afterSwitch.backgroundViewsOutOfLayout && inputLayer.switchedGuest &&
-      memoAndChrome.roundTrip?.retained && memoAndChrome.roundTrip?.layout?.aligned && memoAndChrome.memoMoved && memoAndChrome.nativeDragRegion &&
+      memoAndChrome.roundTrip?.retained && memoAndChrome.roundTrip?.layout?.aligned && memoAndChrome.memoMoved && memoAndChrome.browserChanged && memoAndChrome.browserCanLeadMemo && memoAndChrome.nativeDragRegion &&
       favoritesUi.visible && favoritesUi.contentPane && favoritesUi.singlePane && favoritesUi.noFolderControls && favoritesUi.flatData &&
-      pluginUi.visible && pluginUi.tabs && pluginUi.importReady && pluginUi.declarativeSafety && pluginUi.availableFieldRemoved &&
+      pluginUi.visible && pluginUi.tabs && pluginUi.importReady && pluginUi.declarativeSafety && pluginUi.availableFieldRemoved && pluginUi.iconConsistent && JSON.stringify(pluginUi.badgeRules?.types) === JSON.stringify(['success', 'info', 'warning', 'error']) && pluginUi.badgeRules?.freshCycleHidden && pluginUi.badgeRules?.usedCycleVisible &&
       recycleOverlay.visible && recycleOverlay.completeText && recycleOverlay.insideViewport && recycleOverlay.teleported &&
       updateUi.visible && updateUi.insideViewport && updateUi.versionShown && updateUi.actionsShown && updateUi.safetyShown && updateUi.progressReady &&
       activationStability.guestStable && activationStability.navigationStable &&
