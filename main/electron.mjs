@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 import { secureExtractZip } from './secure-extract.mjs'
+import { PluginService } from './plugin-service.mjs'
 import {
   APP_COMPATIBILITY, UPDATE_API_URL, UPDATE_REPOSITORY, buildApplyUpdatePowerShell,
   legacyProgramManifest, parseProgramManifest, parseReleaseCandidate, safeVersion,
@@ -61,6 +62,7 @@ let updateStatus = { phase: 'idle', currentVersion: app.getVersion(), progress: 
 let updateCandidate = null
 let downloadedUpdate = null
 let updateWork = null
+let pluginService = null
 
 const PERFORMANCE_POLICIES = {
   low: { activeFrameRate: 30, backgroundFrameRate: 5 },
@@ -239,7 +241,6 @@ function exportableSession(current) {
     memoTabIndex: current.memoTabIndex,
     memoActive: current.memoActive,
     createdAt: current.createdAt,
-    availableAt: current.availableAt,
     expiresAt: null,
     recycleAfterDays: current.recycleAfterDays,
     recycleDaysRemaining: current.recycleDaysRemaining,
@@ -275,7 +276,6 @@ function importedSession(payload) {
     memoTabIndex: Math.max(0, Math.min(tabs.length, Number(payload?.memoTabIndex ?? tabs.length))),
     memoActive: Boolean(payload?.memoActive),
     createdAt: new Date().toISOString(),
-    availableAt: typeof payload?.availableAt === 'string' ? payload.availableAt : null,
     expiresAt: null,
     recycleAfterDays: optionalInteger(payload?.recycleAfterDays, 1),
     recycleDaysRemaining: optionalInteger(payload?.recycleDaysRemaining, 0),
@@ -427,7 +427,6 @@ function createSession(name = '默认会话') {
     memoTabIndex: 1,
     memoActive: false,
     createdAt: new Date().toISOString(),
-    availableAt: null,
     expiresAt: null,
     recycleAfterDays: null,
     recycleDaysRemaining: null,
@@ -502,6 +501,7 @@ function normalizeState(candidate) {
     current.memoTabIndex = Math.max(0, Math.min(current.tabs?.length || 0, Number(current.memoTabIndex ?? current.tabs?.length ?? 0)))
     current.memoActive = Boolean(current.memoActive)
     current.createdAt ||= new Date().toISOString()
+    delete current.availableAt
     current.recycleAfterDays = optionalInteger(current.recycleAfterDays, 1)
     current.recycleDaysRemaining = optionalInteger(current.recycleDaysRemaining, 0) ?? current.recycleAfterDays
     current.recycleLastCheckedDate = typeof current.recycleLastCheckedDate === 'string' ? current.recycleLastCheckedDate : null
@@ -1010,6 +1010,10 @@ async function runReadmeCapture() {
     if (!settingsShowcase) throw new Error('设置浮窗未完整显示')
     await delay(500)
     await capture('06-performance.png')
+    const pluginsShowcase = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.showPluginsShowcase()`)
+    if (!pluginsShowcase) throw new Error('插件中心浮窗未完整显示')
+    await delay(500)
+    await capture('07-plugins.png')
     await fsp.writeFile(path.join(captureDir, 'capture-result.json'), JSON.stringify({ ok: true, isolatedDataRoot: dataRoot }, null, 2), 'utf8')
   } catch (error) {
     if (captureDir) await fsp.writeFile(path.join(captureDir, 'capture-result.json'), JSON.stringify({ ok: false, error: error instanceof Error ? error.stack : String(error) }, null, 2), 'utf8').catch(() => {})
@@ -1212,17 +1216,11 @@ async function runSmokeCheck() {
     const tickerDuringModal = activeGuest && !activeGuest.isDestroyed()
       ? await activeGuest.executeJavaScript(`window.__starbrowserModalTicker || 0`)
       : 0
-    const datePicker = await mainWindow.webContents.executeJavaScript(`(async () => {
+    const sessionForm = await mainWindow.webContents.executeJavaScript(`(async () => {
       document.querySelector('[data-testid="settings-modal"] .n-card-header__extra button')?.click()
       await new Promise((resolve) => setTimeout(resolve, 700))
       document.querySelector('[data-testid="new-session"]')?.click()
       await new Promise((resolve) => setTimeout(resolve, 700))
-      const input = document.querySelector('[data-testid="available-picker"] input')
-      input?.click()
-      await new Promise((resolve) => setTimeout(resolve, 450))
-      const panel = document.querySelector('.n-date-panel')
-      const rect = panel?.getBoundingClientRect()
-      const minuteValue = window.__starbrowserTest?.minuteIso(Date.UTC(2026, 7, 20, 9, 37, 45, 912)) || ''
       const recycleSelect = document.querySelector('[data-testid="session-modal"] .n-select .n-base-selection')
       const selectRect = recycleSelect?.getBoundingClientRect()
       recycleSelect?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -1233,13 +1231,7 @@ async function runSmokeCheck() {
       const selectMenuText = selectMenus.map((menu) => menu.textContent || '').join(' ')
       return {
         sessionModalVisible: Boolean(document.querySelector('[data-testid="session-modal"]')),
-        placeholder: input?.getAttribute('placeholder') || '',
-        localized: Boolean(panel && /年|月|今天|此刻/.test(panel.textContent || '')),
-        panelVisible: Boolean(rect && rect.width > 200 && rect.height > 200),
-        panelInsideViewport: Boolean(rect && rect.top >= -1 && rect.left >= -1 && rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1),
-        panelRect: rect ? { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height } : null,
-        minuteValue,
-        minutePrecision: Boolean(minuteValue && new Date(minuteValue).getUTCSeconds() === 0 && new Date(minuteValue).getUTCMilliseconds() === 0),
+        availableFieldRemoved: !document.querySelector('[data-testid="available-picker"]') && !document.querySelector('[data-testid="session-modal"]')?.textContent?.includes('可用时间'),
         recycleSelect: {
           visible: Boolean(selectMenuRect && selectMenuRect.width > 200 && selectMenuRect.height > 150),
           optionCount: ['永不回收', '1 天', '7 天', '15 天', '30 天', '自定义'].filter((label) => selectMenuText.includes(label)).length,
@@ -1333,6 +1325,22 @@ async function runSmokeCheck() {
       document.querySelector('[data-testid="favorites-modal"] .n-card-header__extra button')?.click()
       return result
     })()`)
+    const pluginUi = await mainWindow.webContents.executeJavaScript(`(async () => {
+      document.querySelector('[data-testid="plugins-button"]')?.click()
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      const modal = document.querySelector('[data-testid="plugins-modal"]')
+      const rect = modal?.getBoundingClientRect()
+      const text = modal?.textContent || ''
+      const result = {
+        visible: Boolean(rect && rect.width > 650 && rect.height > 400),
+        tabs: text.includes('全部插件') && text.includes('已安装'),
+        importReady: text.includes('导入 JSON'),
+        declarativeSafety: text.includes('不能执行任意代码'),
+        availableFieldRemoved: !text.includes('可用时间')
+      }
+      document.querySelector('[data-testid="plugins-modal"] .n-card-header__extra button')?.click()
+      return result
+    })()`)
     const recycleOverlay = await mainWindow.webContents.executeJavaScript(`(async () => {
       const sessionId = await window.__starbrowserTest?.prepareRecycleOverlayCheck()
       document.querySelector('[data-testid="recycle-button"]')?.click()
@@ -1382,7 +1390,7 @@ async function runSmokeCheck() {
     const spellcheckDisabled = Boolean(activeAfterSwitch && !activeAfterSwitch.isDestroyed() && !activeAfterSwitch.session.isSpellCheckerEnabled() && !mainWindow.webContents.session.isSpellCheckerEnabled())
     const rendererContextMenuReady = mainWindow.webContents.listenerCount('context-menu') > 0
     const performancePolicy = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.performancePolicyCheck()`)
-    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, sessionSwitch, expiryBadge, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, datePicker, inputLayer, memoAndChrome, favoritesUi, recycleOverlay, updateUi, performancePolicy }
+    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, sessionSwitch, expiryBadge, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, sessionForm, inputLayer, memoAndChrome, favoritesUi, pluginUi, recycleOverlay, updateUi, performancePolicy }
     report.transferArchive = transferArchive
     report.browser = {
       engine: 'dom-webview',
@@ -1397,7 +1405,7 @@ async function runSmokeCheck() {
     report.windowWasVisible = mainWindow.isVisible()
     report.ok = Boolean(
       initial.appReady && initial.sessionCount > 0 && initial.host?.width > 500 && initial.host?.height > 300 &&
-      initial.sidebarFooter?.height <= 44 && initial.sidebarFooter?.toolCount === 3 &&
+      initial.sidebarFooter?.height <= 44 && initial.sidebarFooter?.toolCount === 4 &&
       initial.sessionCard?.borderWidth === 0 && initial.sessionCard?.outlineWidth === 0 &&
       initial.scrollbar?.rightGap >= 3 && initial.scrollbar?.rightGap <= 8 && initial.scrollbar?.railWidth >= 5 &&
       buttonFocus.focusedBeforePointerRelease && buttonFocus.pointerFocusReleased && buttonFocus.keyboardFocusPreserved &&
@@ -1406,14 +1414,14 @@ async function runSmokeCheck() {
       JSON.stringify(reorder.targets) === JSON.stringify([0, 2, 3]) && sessionMenuOverlay.visible && sessionMenuOverlay.insideViewport && sessionMenuOverlay.teleported &&
       modal.settingsVisible && modal.performanceSelect && modal.updateSettings && settingsSelectOverlay.modalInsideViewport && settingsSelectOverlay.modalContentScrollable &&
       settingsSelectOverlay.visible && settingsSelectOverlay.insideViewport && settingsSelectOverlay.teleported &&
-      datePicker.sessionModalVisible && datePicker.placeholder === '选择日期和时间' && datePicker.localized &&
-      datePicker.panelVisible && datePicker.panelInsideViewport && datePicker.minutePrecision &&
-      datePicker.recycleSelect?.visible && datePicker.recycleSelect?.insideViewport && datePicker.recycleSelect?.opensUp &&
+      sessionForm.sessionModalVisible && sessionForm.availableFieldRemoved &&
+      sessionForm.recycleSelect?.visible && sessionForm.recycleSelect?.insideViewport && sessionForm.recycleSelect?.opensUp &&
       !modal.snapshotPresent && modal.activeWebviewVisible && modal.webviewCount === guestBefore.count &&
       inputLayer.before.allHitsActiveWebview && inputLayer.before.onlyOneInputView && inputLayer.before.backgroundViewsOutOfLayout &&
       inputLayer.afterSwitch.allHitsActiveWebview && inputLayer.afterSwitch.onlyOneInputView && inputLayer.afterSwitch.backgroundViewsOutOfLayout && inputLayer.switchedGuest &&
       memoAndChrome.roundTrip?.retained && memoAndChrome.roundTrip?.layout?.aligned && memoAndChrome.memoMoved && memoAndChrome.nativeDragRegion &&
       favoritesUi.visible && favoritesUi.contentPane && favoritesUi.singlePane && favoritesUi.noFolderControls && favoritesUi.flatData &&
+      pluginUi.visible && pluginUi.tabs && pluginUi.importReady && pluginUi.declarativeSafety && pluginUi.availableFieldRemoved &&
       recycleOverlay.visible && recycleOverlay.completeText && recycleOverlay.insideViewport && recycleOverlay.teleported &&
       updateUi.visible && updateUi.insideViewport && updateUi.versionShown && updateUi.actionsShown && updateUi.safetyShown && updateUi.progressReady &&
       performancePolicy.lowLiveTabs === 1 && performancePolicy.lowLiveSessions === 1 && performancePolicy.lowDomGuests === 1 &&
@@ -1469,6 +1477,7 @@ function registerIpc() {
   ipcMain.on('state:update', (_event, nextState) => {
     state = normalizeState(nextState)
     stateDirty = true
+    pluginService?.sessionsChanged()
   })
   ipcMain.handle('browser:clear-session', (_event, sessionId) => clearSessionData(sessionId))
   ipcMain.handle('browser:export-session', (_event, payload) => exportSessionArchive(payload?.sessionId, payload?.password))
@@ -1501,6 +1510,21 @@ function registerIpc() {
   ipcMain.handle('time:sync', () => smokeMode ? { ok: true, now: Date.UTC(2026, 7, 20, 5, 0), source: 'smoke' } : syncChinaNetworkTime())
   ipcMain.handle('system:performance-profile', () => detectPerformanceProfile())
   ipcMain.handle('system:memory-status', () => getMemoryStatus())
+  ipcMain.handle('plugins:get-state', () => pluginService?.publicState() || { catalog: [], installed: [], results: {} })
+  ipcMain.handle('plugins:refresh-catalog', () => pluginService.refreshCatalog(true))
+  ipcMain.handle('plugins:install', (_event, pluginId) => pluginService.install(String(pluginId || '')))
+  ipcMain.handle('plugins:import', async () => {
+    const selection = await dialog.showOpenDialog(mainWindow, {
+      title: '导入 StarBrowser 声明式插件',
+      properties: ['openFile'],
+      filters: [{ name: 'StarBrowser 插件', extensions: ['json'] }],
+    })
+    if (selection.canceled || !selection.filePaths[0]) return { canceled: true, state: pluginService.publicState() }
+    return { canceled: false, state: await pluginService.importFile(selection.filePaths[0]) }
+  })
+  ipcMain.handle('plugins:uninstall', (_event, payload) => pluginService.uninstall(String(payload?.pluginId || ''), Boolean(payload?.deleteConfig)))
+  ipcMain.handle('plugins:update-config', (_event, payload) => pluginService.updateConfig(String(payload?.pluginId || ''), payload?.config))
+  ipcMain.handle('plugins:run', (_event, pluginId) => pluginService.run(String(pluginId || ''), { reason: 'manual' }))
   ipcMain.handle('update:get-status', () => publicUpdateStatus())
   ipcMain.handle('update:check', () => checkForUpdates({ manual: true }))
   ipcMain.handle('update:download', () => downloadUpdate())
@@ -1533,6 +1557,16 @@ if (!hasLock) {
       app.exit(1)
       return
     }
+    pluginService = new PluginService({
+      dataRoot,
+      projectRoot,
+      appVersion: app.getVersion(),
+      fetch: (url, options) => net.fetch(url, options),
+      getSessions: () => state?.sessions || [],
+      getSession: (sessionId) => configureSession(sessionId),
+      notify: (payload) => send('plugins:state', payload),
+    })
+    await pluginService.initialize().catch((error) => console.error('Failed to initialize plugin engine', error))
     await writeCompatibilityLedger().catch((error) => console.error('Failed to write compatibility ledger', error))
     if (legacyCookieImportFile) {
       const report = await importLegacyCookies()
@@ -1556,6 +1590,7 @@ if (!hasLock) {
     }
     event.preventDefault()
     quitting = true
+    pluginService?.dispose()
     void saveStateNow().finally(() => {
       quitPrepared = true
       app.quit()

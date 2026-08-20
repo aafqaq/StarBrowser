@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "id": "chatgpt-usage",
+      "version": "1.0.0",
+      "name": "ChatGPT 用量展示",
+      "description": "显示非免费 ChatGPT 账号的剩余用量与重置时间，不打开额外网页。",
+      "publisher": "StarBrowser",
+      "icon": "chatgpt",
+      "manifestUrl": "https://raw.githubusercontent.com/aafqaq/StarBrowser/main/plugins/chatgpt-usage/plugin.json",
+      "sha256": "233ea0183e82547cbab334ba2695ddb8d44e15dab8da3c5180073e221b9acd8d"
+    }
+  ]
+}

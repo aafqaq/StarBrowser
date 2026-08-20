@@ -42,7 +42,6 @@ function normalizeSession(session) {
     memoTabIndex: Number.isFinite(Number(session?.memoTabIndex)) ? Math.max(0, Math.min(tabs.length, Number(session.memoTabIndex))) : tabs.length,
     memoActive: false,
     createdAt: String(session?.createdAt || new Date().toISOString()),
-    ...(session?.availableAt ? { availableAt: String(session.availableAt) } : {}),
     ...(session?.expiresAt ? { expiresAt: String(session.expiresAt) } : {}),
     activeTabId,
     tabs,

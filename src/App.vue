@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
-  NButton, NCard, NConfigProvider, NDatePicker, NDropdown, NEmpty, NIcon, NInput, NInputNumber,
+  NButton, NCard, NConfigProvider, NDropdown, NEmpty, NIcon, NInput, NInputNumber,
   NModal, NPopconfirm, NProgress, NSelect, NSpin, NSwitch, NTag,
-  dateZhCN, zhCN, type GlobalThemeOverrides,
+  zhCN, type GlobalThemeOverrides,
 } from 'naive-ui'
 import PerfectScrollbar from 'perfect-scrollbar'
 import 'perfect-scrollbar/css/perfect-scrollbar.css'
@@ -13,11 +13,14 @@ import {
   CloudDownloadOutline, CloudUploadOutline, CopyOutline, CreateOutline, EllipsisHorizontal, ExpandOutline, FolderOpenOutline,
   DocumentTextOutline, GlobeOutline, InformationCircleOutline, LayersOutline, MenuOutline, RefreshOutline,
   CheckmarkCircleOutline, OpenOutline, RemoveOutline, RocketOutline, SaveOutline, SearchOutline, Star, StarOutline, StopOutline,
-  TimeOutline, TrashOutline,
+  TrashOutline, ExtensionPuzzleOutline, ChatbubbleEllipsesOutline, SyncOutline, WarningOutline,
 } from '@vicons/ionicons5'
-import type { AppState, BrowserSession, BrowserTab, Favorite, FavoriteFolder, HardwareClass, MemoryPressureLevel, PerformanceTier, UpdateStatus } from './types'
+import type {
+  AppState, BrowserSession, BrowserTab, Favorite, FavoriteFolder, HardwareClass, InstalledPlugin,
+  MemoryPressureLevel, PerformanceTier, PluginEngineState, PluginSettingSchema, UpdateStatus,
+} from './types'
 
-type ModalKind = '' | 'session' | 'favorites' | 'settings' | 'recycle' | 'transfer' | 'update' | 'close'
+type ModalKind = '' | 'session' | 'favorites' | 'plugins' | 'settings' | 'recycle' | 'transfer' | 'update' | 'close'
 type HeaderItem = { id: string; kind: 'browser'; tab: BrowserTab } | { id: '__memo__'; kind: 'memo' }
 
 const api = window.starbrowser
@@ -41,6 +44,12 @@ const machineProfile = ref<{ tier: PerformanceTier; hardwareClass: HardwareClass
 const memoryStatus = ref<{ level: MemoryPressureLevel; freeMemoryGB: number; usedPercent: number; appWorkingSetMB: number }>({ level: 'normal', freeMemoryGB: 0, usedPercent: 0, appWorkingSetMB: 0 })
 const performanceAdvice = ref<{ recommended: HardwareClass; reason: string } | null>(null)
 const updateInfo = ref<UpdateStatus>({ phase: 'idle', currentVersion: '', progress: 0, transferred: 0, total: 0, speed: 0, error: '', manual: false, candidate: null })
+const pluginState = ref<PluginEngineState>({ catalog: [], installed: [], results: {} })
+const pluginCenterTab = ref<'all' | 'installed'>('all')
+const pluginSettingsId = ref('')
+const pluginConfigDraft = ref<Record<string, string | number | boolean>>({})
+const pluginCenterBusy = ref('')
+const deletePluginConfig = ref(false)
 const logoUrl = new URL('../assets/starbrowser.ico', import.meta.url).href
 let maintenanceTimer: number | null = null
 let performanceMonitorTimer: number | null = null
@@ -70,7 +79,7 @@ const favoriteDrag = reactive({
   id: '', pointerId: -1, startX: 0, offsetX: 0, left: 0, top: 0, width: 0, height: 0, moved: false,
 })
 
-const sessionDraft = reactive({ name: '', availableAt: null as number | null, recycleMode: 'never', customRecycleDays: null as number | null })
+const sessionDraft = reactive({ name: '', recycleMode: 'never', customRecycleDays: null as number | null })
 const settingsDraft = reactive<{
   closeBehavior: 'ask' | 'tray' | 'exit'
   maximizeBehavior: 'maximize' | 'fullscreen'
@@ -174,7 +183,7 @@ const hardwareClassLabels: Record<HardwareClass, string> = { 'ultra-low': '超�
 const modalTitle = computed(() => {
   const titles: Record<Exclude<ModalKind, ''>, string> = {
     session: editingSessionId.value ? '编辑会话' : '新建隔离会话',
-    favorites: '收藏夹', settings: '设置', recycle: '回收站', transfer: transferMode.value === 'export' ? '导出加密会话' : '导入加密会话', update: '软件更新', close: '关闭 StarBrowser',
+    favorites: '收藏夹', plugins: '插件中心', settings: '设置', recycle: '回收站', transfer: transferMode.value === 'export' ? '导出加密会话' : '导入加密会话', update: '软件更新', close: '关闭 StarBrowser',
   }
   return modalKind.value ? titles[modalKind.value] : ''
 })
@@ -184,6 +193,7 @@ const modalShown = computed({
 })
 const favoriteActive = computed(() => Boolean(activeTab.value && state.value?.favorites.some((item) => item.url === activeTab.value!.url)))
 const rootFavorites = computed(() => state.value?.favorites || [])
+const selectedPluginSettings = computed(() => pluginState.value.installed.find((item) => item.id === pluginSettingsId.value) || null)
 const headerItems = computed<HeaderItem[]>(() => {
   const session = activeSession.value
   if (!session) return []
@@ -229,7 +239,7 @@ function createSession(name = '新会话'): BrowserSession {
   const tab = createTab()
   return {
     id: uid(), profileName: `session_${uid()}`, name, memo: '', memoTabVisible: false, memoTabIndex: 1,
-    memoActive: false, createdAt: new Date().toISOString(), availableAt: null, expiresAt: null,
+    memoActive: false, createdAt: new Date().toISOString(), expiresAt: null,
     recycleAfterDays: null, recycleDaysRemaining: null, recycleLastCheckedDate: null,
     activeTabId: tab.id, tabs: [tab],
   }
@@ -274,15 +284,6 @@ function recommendedLowerTier(current: HardwareClass, severity: MemoryPressureLe
 function remainingDays(session: BrowserSession) {
   if (session.recycleDaysRemaining === null || session.recycleDaysRemaining === undefined) return null
   return Number.isFinite(Number(session.recycleDaysRemaining)) ? Math.max(0, Math.floor(Number(session.recycleDaysRemaining))) : null
-}
-
-function availabilityLabel(session: BrowserSession) {
-  if (!session.availableAt || !clockNow.value) return ''
-  const difference = new Date(session.availableAt).getTime() - clockNow.value
-  if (difference <= 0) return '可用'
-  if (difference >= 86_400_000) return `${Math.ceil(difference / 86_400_000)}天后可用`
-  if (difference >= 3_600_000) return `${Math.ceil(difference / 3_600_000)}小时后可用`
-  return `${Math.max(1, Math.ceil(difference / 60_000))}分钟后可用`
 }
 
 function partitionFor(session: BrowserSession) {
@@ -813,17 +814,9 @@ function closeModal() {
   modalKind.value = ''
 }
 
-function minuteIso(value: number | null) {
-  if (!value) return null
-  const date = new Date(value)
-  date.setSeconds(0, 0)
-  return date.toISOString()
-}
-
 async function openNewSession() {
   editingSessionId.value = ''
   sessionDraft.name = '新会话'
-  sessionDraft.availableAt = null
   sessionDraft.recycleMode = 'never'
   sessionDraft.customRecycleDays = null
   await openModal('session')
@@ -832,7 +825,6 @@ async function openNewSession() {
 async function editSession(session: BrowserSession) {
   editingSessionId.value = session.id
   sessionDraft.name = session.name
-  sessionDraft.availableAt = session.availableAt ? new Date(session.availableAt).getTime() : null
   const days = remainingDays(session)
   sessionDraft.recycleMode = days !== null && [1, 7, 15, 30].includes(days) ? String(days) : days === null ? 'never' : 'custom'
   sessionDraft.customRecycleDays = sessionDraft.recycleMode === 'custom' ? days : null
@@ -848,7 +840,6 @@ async function saveSession() {
     state.value.activeSessionId = target.id
   }
   target.name = sessionDraft.name.trim()
-  target.availableAt = minuteIso(sessionDraft.availableAt)
   const days = sessionDraft.recycleMode === 'never'
     ? null
     : sessionDraft.recycleMode === 'custom'
@@ -881,6 +872,7 @@ function sessionMenuOptions(session: BrowserSession) {
 function sidebarToolOptions() {
   return [
     { label: '导入会话', key: 'import', icon: () => h(NIcon, null, { default: () => h(CloudDownloadOutline) }) },
+    { label: '插件', key: 'plugins', icon: () => h(NIcon, null, { default: () => h(ExtensionPuzzleOutline) }) },
     { label: `回收站${state.value?.recycleBin.length ? `（${state.value.recycleBin.length}）` : ''}`, key: 'recycle', icon: () => h(NIcon, null, { default: () => h(TrashOutline) }) },
     { label: '设置', key: 'settings', icon: () => h(NIcon, null, { default: () => h(CogOutline) }) },
   ]
@@ -888,6 +880,7 @@ function sidebarToolOptions() {
 
 function handleSidebarTool(key: string) {
   if (key === 'import') openImportSession()
+  if (key === 'plugins') void openPlugins()
   if (key === 'recycle') void openModal('recycle')
   if (key === 'settings') void openSettings()
 }
@@ -1175,6 +1168,143 @@ function quickEditFavorite(favorite: Favorite) {
   void openModal('favorites')
 }
 
+function installedPlugin(pluginId: string) {
+  return pluginState.value.installed.find((item) => item.id === pluginId) || null
+}
+
+function pluginIcon(plugin: { icon: string }) {
+  if (plugin.icon === 'chatgpt') return ChatbubbleEllipsesOutline
+  return ExtensionPuzzleOutline
+}
+
+function resetDistanceLabel(value: unknown) {
+  const resetAt = Date.parse(String(value || ''))
+  if (!Number.isFinite(resetAt)) return ''
+  const difference = resetAt - (clockNow.value || Date.now())
+  if (difference <= 0) return '即将重置'
+  if (difference >= 86_400_000) return `${Math.ceil(difference / 86_400_000)}天重置`
+  if (difference >= 3_600_000) return `${Math.ceil(difference / 3_600_000)}小时重置`
+  return `${Math.max(1, Math.ceil(difference / 60_000))}分钟重置`
+}
+
+function nestedValue(value: unknown, dottedPath: string) {
+  return dottedPath.split('.').reduce<unknown>((current, key) => {
+    if (!current || typeof current !== 'object') return undefined
+    return (current as Record<string, unknown>)[key]
+  }, value)
+}
+
+function sessionPluginBadges(session: BrowserSession) {
+  const badges: Array<{ key: string; label: string; type: 'default' | 'success' | 'warning' | 'error' | 'info'; title: string }> = []
+  for (const plugin of pluginState.value.installed) {
+    const result = pluginState.value.results[plugin.id]?.[session.id]
+    if (!result) continue
+    for (const [index, definition] of plugin.sessionBadges.entries()) {
+      if (definition.whenStatus !== result.status) continue
+      const fieldValue = definition.field ? result.fields[definition.field] : undefined
+      let label = definition.label || ''
+      if (definition.format === 'reset-distance') label = resetDistanceLabel(fieldValue)
+      else if (definition.format) label = definition.format.replace('{value}', String(fieldValue ?? ''))
+      if (!label) continue
+      badges.push({
+        key: `${plugin.id}:${index}`,
+        label,
+        type: definition.type || 'default',
+        title: definition.tooltipField ? String(nestedValue(result, definition.tooltipField) || '') : result.message || '',
+      })
+    }
+  }
+  return badges
+}
+
+async function openPlugins() {
+  pluginSettingsId.value = ''
+  deletePluginConfig.value = false
+  pluginState.value = await api.plugins.getState()
+  await openModal('plugins')
+  pluginCenterBusy.value = 'catalog'
+  try { pluginState.value = await api.plugins.refreshCatalog() } catch (error) { notify(error instanceof Error ? error.message : '插件目录更新失败') }
+  finally { pluginCenterBusy.value = '' }
+}
+
+async function installPlugin(pluginId: string) {
+  const updating = Boolean(installedPlugin(pluginId))
+  pluginCenterBusy.value = `install:${pluginId}`
+  try {
+    pluginState.value = await api.plugins.install(pluginId)
+    pluginCenterTab.value = 'installed'
+    notify(updating ? '插件已安全更新，配置保持不变' : '插件安装完成，正在首次更新')
+  } catch (error) { notify(error instanceof Error ? error.message : '插件安装失败') }
+  finally { pluginCenterBusy.value = '' }
+}
+
+async function importPlugin() {
+  pluginCenterBusy.value = 'import'
+  try {
+    const result = await api.plugins.import()
+    if (result.canceled) return
+    pluginState.value = result.state
+    pluginCenterTab.value = 'installed'
+    notify('本地插件已校验并导入')
+  } catch (error) { notify(error instanceof Error ? error.message : '插件导入失败') }
+  finally { pluginCenterBusy.value = '' }
+}
+
+function openPluginSettings(plugin: InstalledPlugin | null) {
+  if (!plugin) return
+  pluginSettingsId.value = plugin.id
+  pluginConfigDraft.value = { ...plugin.config }
+  deletePluginConfig.value = false
+}
+
+function settingVisible(setting: PluginSettingSchema) {
+  return !setting.visibleWhen || pluginConfigDraft.value[setting.visibleWhen.key] === setting.visibleWhen.equals
+}
+
+function setPluginSetting(setting: PluginSettingSchema, value: string | number | boolean | null) {
+  if (value === null) return
+  pluginConfigDraft.value[setting.key] = value
+}
+
+function selectSettingValue(setting: PluginSettingSchema) {
+  const value = pluginConfigDraft.value[setting.key]
+  return typeof value === 'string' || typeof value === 'number' ? value : null
+}
+
+function selectSettingOptions(setting: PluginSettingSchema) {
+  return (setting.options || []).filter((option) => typeof option.value === 'string' || typeof option.value === 'number')
+}
+
+async function savePluginSettings() {
+  if (!pluginSettingsId.value) return
+  pluginCenterBusy.value = `settings:${pluginSettingsId.value}`
+  try {
+    pluginState.value = await api.plugins.updateConfig(pluginSettingsId.value, pluginConfigDraft.value)
+    notify('插件设置已保存')
+  } catch (error) { notify(error instanceof Error ? error.message : '插件设置保存失败') }
+  finally { pluginCenterBusy.value = '' }
+}
+
+async function runPlugin(pluginId: string) {
+  pluginCenterBusy.value = `run:${pluginId}`
+  try {
+    const result = await api.plugins.run(pluginId)
+    pluginState.value = result.state
+    notify(result.refreshed ? `已依次更新 ${result.refreshed} 个会话` : '没有找到打开过对应网站的会话')
+  } catch (error) { notify(error instanceof Error ? error.message : '插件更新失败') }
+  finally { pluginCenterBusy.value = '' }
+}
+
+async function uninstallPlugin(pluginId: string) {
+  pluginCenterBusy.value = `uninstall:${pluginId}`
+  try {
+    pluginState.value = await api.plugins.uninstall(pluginId, deletePluginConfig.value)
+    pluginSettingsId.value = ''
+    notify(deletePluginConfig.value ? '插件及其配置已删除' : '插件已卸载，配置已保留')
+  } catch (error) { notify(error instanceof Error ? error.message : '插件卸载失败') }
+  finally { pluginCenterBusy.value = '' }
+}
+
 async function openSettings() {
   if (!state.value) return
   Object.assign(settingsDraft, {
@@ -1417,9 +1547,10 @@ async function webviewGone(event: Event) {
 
 onMounted(async () => {
   document.addEventListener('pointerup', releasePointerButtonFocus, true)
-  const [loadedState, detectedProfile] = await Promise.all([api.state.get(), api.system.performanceProfile()])
+  const [loadedState, detectedProfile, loadedPlugins] = await Promise.all([api.state.get(), api.system.performanceProfile(), api.plugins.getState()])
   state.value = loadedState
   machineProfile.value = detectedProfile
+  pluginState.value = loadedPlugins
   updateInfo.value = await api.update.getStatus()
   await nextTick()
   if (sessionList.value) sessionScrollbar = new PerfectScrollbar(sessionList.value, { suppressScrollX: true, wheelPropagation: false })
@@ -1447,7 +1578,6 @@ onMounted(async () => {
         return changed
       },
       targetTabIndex,
-      minuteIso,
       getHeaderOrder: () => headerItems.value.map((item) => item.id),
       reorderHeaderItems: (fromIndex, toIndex) => {
         const changed = reorderHeader(fromIndex, toIndex)
@@ -1564,7 +1694,6 @@ onMounted(async () => {
         personal.recycleAfterDays = 15
         personal.recycleDaysRemaining = 12
         const store = createSession('店铺运营')
-        store.availableAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
         store.recycleAfterDays = 30
         store.recycleDaysRemaining = 29
         const temporary = createSession('临时测试')
@@ -1652,6 +1781,15 @@ onMounted(async () => {
         const center = rect ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null
         return Boolean(rect && card && center && card.contains(center) && card.textContent?.includes('检查更新'))
       },
+      showPluginsShowcase: async () => {
+        modalKind.value = ''
+        await nextTick()
+        await openPlugins()
+        await nextTick()
+        const card = document.querySelector<HTMLElement>('[data-testid="plugins-modal"]')
+        const rect = card?.getBoundingClientRect()
+        return Boolean(card && rect && rect.width > 650 && rect.height > 400 && card.textContent?.includes('ChatGPT 用量展示'))
+      },
       activateTabAt: async (index) => {
         const tab = activeSession.value?.tabs[index]
         if (!tab) return ''
@@ -1725,6 +1863,7 @@ const unsubscribe = [
   api.window.onChanged((value) => { isMaximized.value = value.maximized || value.fullscreen }),
   api.app.onCloseRequest(() => { rememberClose.value = false; void openModal('close') }),
   api.update.onStatus(handleUpdateStatus),
+  api.plugins.onState((value) => { pluginState.value = value }),
 ]
 
 watch(activeTab, (tab) => { if (tab) address.value = tab.url })
@@ -1751,7 +1890,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <n-config-provider :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
+  <n-config-provider :theme-overrides="themeOverrides" :locale="zhCN">
     <div v-if="state" class="app-shell" :class="[{ collapsed: sidebarCollapsed, maximized: isMaximized }, `performance-${effectivePerformanceTier}`]" :data-performance-tier="effectivePerformanceTier" :data-hardware-class="selectedPerformanceTier">
       <header class="titlebar">
         <div class="brand-area">
@@ -1824,8 +1963,8 @@ onBeforeUnmount(() => {
                     <n-button quaternary circle size="small" aria-label="更多操作"><template #icon><n-icon><EllipsisHorizontal /></n-icon></template></n-button>
                   </n-dropdown>
                 </div>
-                <div v-if="availabilityLabel(session) || remainingDays(session) !== null" class="session-tags">
-                  <n-tag v-if="availabilityLabel(session)" size="small" round :type="availabilityLabel(session) === '可用' ? 'success' : 'info'">{{ availabilityLabel(session) }}</n-tag>
+                <div v-if="remainingDays(session) !== null || sessionPluginBadges(session).length" class="session-tags">
+                  <n-tag v-for="badge in sessionPluginBadges(session)" :key="badge.key" size="small" round :type="badge.type" :title="badge.title">{{ badge.label }}</n-tag>
                   <n-tag v-if="remainingDays(session) !== null" size="small" round type="warning">剩余 {{ remainingDays(session) }} 天</n-tag>
                 </div>
               </template>
@@ -1835,6 +1974,7 @@ onBeforeUnmount(() => {
           <div class="sidebar-footer">
             <template v-if="!sidebarCollapsed">
               <n-button quaternary class="footer-tool" @click="openImportSession"><template #icon><n-icon><CloudDownloadOutline /></n-icon></template>导入</n-button>
+              <n-button quaternary data-testid="plugins-button" class="footer-tool" @click="openPlugins"><template #icon><n-icon><ExtensionPuzzleOutline /></n-icon></template>插件</n-button>
               <n-button quaternary data-testid="recycle-button" class="footer-tool footer-recycle" @click="openModal('recycle')"><template #icon><n-icon><TrashOutline /></n-icon></template>回收站<span v-if="state.recycleBin.length" class="footer-count">{{ state.recycleBin.length }}</span></n-button>
               <n-button quaternary data-testid="settings-button" class="footer-tool" @click="openSettings"><template #icon><n-icon><CogOutline /></n-icon></template>设置</n-button>
             </template>
@@ -1904,7 +2044,6 @@ onBeforeUnmount(() => {
 
           <div v-if="modalKind === 'session'" class="form-stack">
             <label>会话名称<n-input v-model:value="sessionDraft.name" maxlength="80" placeholder="例如：工作账号" /></label>
-            <label>可用时间（仅用于记录，精确到分钟）<n-date-picker v-model:value="sessionDraft.availableAt" data-testid="available-picker" type="datetime" format="yyyy-MM-dd HH:mm" time-picker-format="HH:mm" placeholder="选择日期和时间" placement="bottom-start" to="body" :actions="['clear', 'now']" update-value-on-close clearable /></label>
             <label>自动移入回收站
               <n-select v-model:value="sessionDraft.recycleMode" :options="recycleOptions" placement="top-start" to="body" />
             </label>
@@ -1935,6 +2074,75 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
+          </div>
+
+          <div v-if="modalKind === 'plugins'" class="plugin-center">
+            <template v-if="!selectedPluginSettings">
+              <div class="plugin-toolbar">
+                <div class="plugin-tabs">
+                  <button :class="{ active: pluginCenterTab === 'all' }" @click="pluginCenterTab = 'all'">全部插件</button>
+                  <button :class="{ active: pluginCenterTab === 'installed' }" @click="pluginCenterTab = 'installed'">已安装 <span>{{ pluginState.installed.length }}</span></button>
+                </div>
+                <div class="plugin-toolbar-actions">
+                  <n-button size="small" secondary :loading="pluginCenterBusy === 'import'" @click="importPlugin"><template #icon><n-icon><CloudUploadOutline /></n-icon></template>导入 JSON</n-button>
+                  <n-button size="small" quaternary :loading="pluginCenterBusy === 'catalog'" @click="openPlugins"><template #icon><n-icon><SyncOutline /></n-icon></template>刷新目录</n-button>
+                </div>
+              </div>
+              <div class="plugin-security-note"><n-icon><InformationCircleOutline /></n-icon><span>在线插件仅来自 StarBrowser 官方仓库并校验完整性；插件为受限 JSON 规则，不能执行任意代码。</span></div>
+
+              <div v-if="pluginCenterTab === 'all'" class="plugin-list">
+                <article v-for="plugin in pluginState.catalog" :key="plugin.id" class="plugin-card">
+                  <span class="plugin-icon"><n-icon><component :is="pluginIcon(plugin)" /></n-icon></span>
+                  <div class="plugin-card-copy"><div><strong>{{ plugin.name }}</strong><n-tag size="small" round>v{{ plugin.version }}</n-tag></div><p>{{ plugin.description }}</p><small>{{ plugin.publisher }}</small></div>
+                  <div class="plugin-card-actions">
+                    <n-button v-if="!installedPlugin(plugin.id)" type="primary" size="small" :loading="pluginCenterBusy === `install:${plugin.id}`" @click="installPlugin(plugin.id)">安装</n-button>
+                    <n-button v-else-if="installedPlugin(plugin.id)?.updateAvailable" type="primary" size="small" :loading="pluginCenterBusy === `install:${plugin.id}`" @click="installPlugin(plugin.id)">更新至 v{{ installedPlugin(plugin.id)?.availableVersion }}</n-button>
+                    <n-button v-else size="small" secondary @click="openPluginSettings(installedPlugin(plugin.id))">已安装</n-button>
+                  </div>
+                </article>
+                <n-empty v-if="!pluginState.catalog.length" description="插件目录暂不可用，可导入符合规范的 JSON 插件" />
+              </div>
+
+              <div v-else class="plugin-list">
+                <article v-for="plugin in pluginState.installed" :key="plugin.id" class="plugin-card installed">
+                  <span class="plugin-icon"><n-icon><component :is="pluginIcon(plugin)" /></n-icon></span>
+                  <div class="plugin-card-copy"><div><strong>{{ plugin.name }}</strong><n-tag v-if="plugin.updateAvailable" size="small" round type="success">可更新</n-tag><n-tag v-else size="small" round>v{{ plugin.version }}</n-tag></div><p>{{ plugin.description }}</p><small v-if="plugin.loadError" class="plugin-load-error">{{ plugin.loadError }}</small><small v-else>配置与运行数据由插件引擎隔离管理</small></div>
+                  <div class="plugin-card-actions horizontal">
+                    <n-button v-if="plugin.updateAvailable" size="small" type="primary" :loading="pluginCenterBusy === `install:${plugin.id}`" @click="installPlugin(plugin.id)">更新</n-button>
+                    <n-button size="small" secondary :loading="plugin.running || pluginCenterBusy === `run:${plugin.id}`" @click="runPlugin(plugin.id)"><template #icon><n-icon><SyncOutline /></n-icon></template>立即更新</n-button>
+                    <n-button size="small" @click="openPluginSettings(plugin)">设置</n-button>
+                  </div>
+                </article>
+                <n-empty v-if="!pluginState.installed.length" description="尚未安装插件，新安装的软件默认保持纯净" />
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="plugin-settings-head">
+                <n-button quaternary circle @click="pluginSettingsId = ''"><template #icon><n-icon><ArrowBackOutline /></n-icon></template></n-button>
+                <span class="plugin-icon"><n-icon><component :is="pluginIcon(selectedPluginSettings)" /></n-icon></span>
+                <div><strong>{{ selectedPluginSettings.name }}</strong><span>v{{ selectedPluginSettings.version }} · {{ selectedPluginSettings.publisher }}</span></div>
+                <n-button secondary :loading="selectedPluginSettings.running || pluginCenterBusy === `run:${selectedPluginSettings.id}`" @click="runPlugin(selectedPluginSettings.id)">立即更新</n-button>
+              </div>
+              <div class="plugin-settings-form">
+                <template v-for="setting in selectedPluginSettings.settingsSchema" :key="setting.key">
+                  <label v-if="settingVisible(setting)">
+                    <span><strong>{{ setting.label }}</strong><small>{{ setting.description }}</small></span>
+                    <n-select v-if="setting.type === 'select'" :value="selectSettingValue(setting)" :options="selectSettingOptions(setting)" placement="bottom-start" to="body" @update:value="(value) => setPluginSetting(setting, value)" />
+                    <n-input-number v-else-if="setting.type === 'number'" :value="Number(pluginConfigDraft[setting.key])" :min="setting.minimum" :max="setting.maximum" :step="setting.step" :show-button="false" @update:value="(value) => setPluginSetting(setting, value)" />
+                    <n-switch v-else :value="Boolean(pluginConfigDraft[setting.key])" @update:value="(value) => setPluginSetting(setting, value)" />
+                  </label>
+                </template>
+              </div>
+              <div class="plugin-uninstall-row">
+                <label><span><strong>删除插件配置</strong><small>默认关闭，卸载后重新安装可继续使用原配置</small></span><n-switch v-model:value="deletePluginConfig" /></label>
+                <n-popconfirm placement="top-end" to="body" negative-text="取消" positive-text="确认卸载" @positive-click="uninstallPlugin(selectedPluginSettings.id)">
+                  <template #trigger><n-button type="error" secondary :loading="pluginCenterBusy === `uninstall:${selectedPluginSettings.id}`">卸载插件</n-button></template>
+                  {{ deletePluginConfig ? '插件与独立配置都会删除，继续吗？' : '插件会卸载，但独立配置会保留。' }}
+                </n-popconfirm>
+              </div>
+              <div class="dialog-actions"><n-button @click="pluginSettingsId = ''">返回</n-button><n-button type="primary" :loading="pluginCenterBusy === `settings:${selectedPluginSettings.id}`" @click="savePluginSettings">保存设置</n-button></div>
+            </template>
           </div>
 
           <div v-if="modalKind === 'settings'" class="form-stack">

@@ -50,4 +50,14 @@ contextBridge.exposeInMainWorld('starbrowser', {
     performanceProfile: () => ipcRenderer.invoke('system:performance-profile'),
     memoryStatus: () => ipcRenderer.invoke('system:memory-status'),
   },
+  plugins: {
+    getState: () => ipcRenderer.invoke('plugins:get-state'),
+    refreshCatalog: () => ipcRenderer.invoke('plugins:refresh-catalog'),
+    install: (pluginId) => ipcRenderer.invoke('plugins:install', pluginId),
+    import: () => ipcRenderer.invoke('plugins:import'),
+    uninstall: (pluginId, deleteConfig) => ipcRenderer.invoke('plugins:uninstall', { pluginId, deleteConfig }),
+    updateConfig: (pluginId, config) => ipcRenderer.invoke('plugins:update-config', { pluginId, config }),
+    run: (pluginId) => ipcRenderer.invoke('plugins:run', pluginId),
+    onState: (callback) => on('plugins:state', callback),
+  },
 })

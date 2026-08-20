@@ -10,8 +10,9 @@ SOURCES = [
     (SCREENSHOTS / "02-session-switch.png", "一键切换身份，网页与标签随会话切换"),
     (SCREENSHOTS / "03-favorites.png", "收藏夹在所有会话之间共享"),
     (SCREENSHOTS / "04-memo.png", "备注是可以拖动排序的独立标签页"),
-    (SCREENSHOTS / "05-session-settings.png", "记录可用时间，并按规则自动回收会话"),
+    (SCREENSHOTS / "05-session-settings.png", "按规则自动回收会话"),
     (SCREENSHOTS / "06-performance.png", "五档性能策略适配不同配置的电脑"),
+    (SCREENSHOTS / "07-plugins.png", "声明式插件中心，按需安装且配置隔离"),
 ]
 
 

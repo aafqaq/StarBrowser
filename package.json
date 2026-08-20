@@ -14,7 +14,8 @@
     "dist": "npm run build && electron-builder --win dir --x64 && node scripts/finalize-dist.mjs && node scripts/write-program-manifest.mjs",
     "dist:dir": "npm run dist",
     "test:update": "node scripts/test-update-core.mjs",
-    "test:update:integration": "node scripts/test-update-integration.mjs"
+    "test:update:integration": "node scripts/test-update-integration.mjs",
+    "test:plugins": "node scripts/test-plugin-engine.mjs"
   },
   "devDependencies": {
     "@vicons/ionicons5": "0.13.0",

@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "id": "chatgpt-usage",
+  "version": "1.0.0",
+  "name": "ChatGPT 用量展示",
+  "description": "自动识别打开过 chatgpt.com 的隔离会话，不创建网页标签，直接使用该会话的登录凭证读取非免费账号用量与重置时间。",
+  "publisher": "StarBrowser",
+  "homepage": "https://github.com/aafqaq/StarBrowser/tree/main/plugins/chatgpt-usage",
+  "icon": "chatgpt",
+  "permissions": {
+    "hosts": [
+      "https://chatgpt.com"
+    ],
+    "capabilities": [
+      "session.read-tabs",
+      "session.read-cookie-presence",
+      "session.fetch",
+      "session.badges",
+      "schedule.startup",
+      "schedule.interval"
+    ]
+  },
+  "settingsSchema": [
+    {
+      "key": "updateMode",
+      "label": "自动更新",
+      "description": "选择每次启动更新，或按固定间隔更新。",
+      "type": "select",
+      "default": "startup",
+      "options": [
+        { "label": "每次启动", "value": "startup" },
+        { "label": "自定义小时数", "value": "interval" }
+      ]
+    },
+    {
+      "key": "intervalHours",
+      "label": "更新间隔",
+      "description": "后台按顺序更新符合条件的会话，不会打开 WebView。",
+      "type": "number",
+      "default": 6,
+      "minimum": 1,
+      "maximum": 720,
+      "step": 1,
+      "visibleWhen": { "key": "updateMode", "equals": "interval" }
+    }
+  ],
+  "hooks": {
+    "sessionMatch": {
+      "tabHosts": ["chatgpt.com"],
+      "cookieUrls": ["https://chatgpt.com/"]
+    },
+    "schedule": {
+      "modeSetting": "updateMode",
+      "startupValue": "startup",
+      "intervalValue": "interval",
+      "intervalSetting": "intervalHours"
+    },
+    "sessionBadges": [
+      {
+        "whenStatus": "updating",
+        "label": "更新中",
+        "type": "info"
+      },
+      {
+        "whenStatus": "ok",
+        "field": "remainingPercent",
+        "format": "剩余 {value}%",
+        "type": "success"
+      },
+      {
+        "whenStatus": "ok",
+        "field": "resetAt",
+        "format": "reset-distance",
+        "type": "info"
+      },
+      {
+        "whenStatus": "error",
+        "label": "!",
+        "type": "error",
+        "tooltipField": "error.message"
+      }
+    ],
+    "refresh": {
+      "steps": [
+        {
+          "id": "auth",
+          "request": {
+            "method": "GET",
+            "url": "https://chatgpt.com/api/auth/session",
+            "timeoutMs": 12000,
+            "headers": {
+              "Accept": "application/json"
+            }
+          },
+          "required": [
+            {
+              "path": "body.accessToken",
+              "code": "not-logged-in",
+              "message": "ChatGPT 会话未登录或登录已失效"
+            }
+          ]
+        },
+        {
+          "id": "usage",
+          "request": {
+            "method": "GET",
+            "url": "https://chatgpt.com/backend-api/wham/usage",
+            "timeoutMs": 12000,
+            "headers": {
+              "Accept": "application/json",
+              "Authorization": "Bearer {{steps.auth.body.accessToken}}"
+            }
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "key": "planType",
+          "sources": [
+            "steps.usage.body.plan_type",
+            "steps.usage.body.planType",
+            "steps.auth.body.user.plan_type",
+            "steps.auth.body.user.planType"
+          ],
+          "transform": "lowercase"
+        },
+        {
+          "key": "remainingPercent",
+          "sources": [
+            "steps.usage.body.rate_limit.primary_window.used_percent",
+            "steps.usage.body.rate_limit.primary_window.usedPercent",
+            "steps.usage.body.usage.primary_window.used_percent"
+          ],
+          "transform": "remaining-percent"
+        },
+        {
+          "key": "resetAt",
+          "sources": [
+            "steps.usage.body.rate_limit.primary_window.reset_at",
+            "steps.usage.body.rate_limit.primary_window.resetAt"
+          ],
+          "transform": "epoch-seconds-to-iso"
+        },
+        {
+          "key": "resetAt",
+          "sources": [
+            "steps.usage.body.rate_limit.primary_window.reset_after_seconds",
+            "steps.usage.body.rate_limit.primary_window.resetAfterSeconds"
+          ],
+          "transform": "seconds-from-now-to-iso"
+        }
+      ],
+      "classify": [
+        {
+          "field": "planType",
+          "in": ["free", "chatgptfreeplan", "free_plan"],
+          "status": "not-applicable",
+          "message": "免费账号不展示用量"
+        }
+      ]
+    }
+  }
+}

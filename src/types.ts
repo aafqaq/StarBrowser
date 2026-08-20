@@ -18,7 +18,6 @@ export interface BrowserSession {
   memoTabIndex: number
   memoActive: boolean
   createdAt: string
-  availableAt: string | null
   expiresAt: string | null
   recycleAfterDays: number | null
   recycleDaysRemaining: number | null
@@ -98,6 +97,60 @@ export interface AppState {
   settings: AppSettings
 }
 
+export interface PluginSettingSchema {
+  key: string
+  label: string
+  description: string
+  type: 'select' | 'number' | 'boolean'
+  default: string | number | boolean
+  minimum?: number
+  maximum?: number
+  step?: number
+  options?: Array<{ label: string; value: string | number }>
+  visibleWhen?: { key: string; equals: string | number | boolean }
+}
+
+export interface PluginCatalogEntry {
+  id: string
+  version: string
+  name: string
+  description: string
+  publisher: string
+  icon: string
+}
+
+export interface InstalledPlugin extends PluginCatalogEntry {
+  settingsSchema: PluginSettingSchema[]
+  sessionBadges: Array<{
+    whenStatus: PluginSessionResult['status']
+    label?: string
+    field?: string
+    format?: string
+    type?: 'default' | 'success' | 'warning' | 'error' | 'info'
+    tooltipField?: string
+  }>
+  config: Record<string, string | number | boolean>
+  installedAt: string
+  loadError: string
+  running: boolean
+  updateAvailable: boolean
+  availableVersion: string
+}
+
+export interface PluginSessionResult {
+  status: 'updating' | 'ok' | 'not-applicable' | 'error'
+  message?: string
+  fields: Record<string, string | number | boolean>
+  checkedAt: string
+  error: null | { code: string; message: string }
+}
+
+export interface PluginEngineState {
+  catalog: PluginCatalogEntry[]
+  installed: InstalledPlugin[]
+  results: Record<string, Record<string, PluginSessionResult>>
+}
+
 export interface ElectronApi {
   state: {
     get(): Promise<AppState>
@@ -141,5 +194,15 @@ export interface ElectronApi {
   system: {
     performanceProfile(): Promise<{ tier: PerformanceTier; hardwareClass: HardwareClass; hardwareScore: number; totalMemoryGB: number; logicalCpuCount: number; averageCpuMHz: number }>
     memoryStatus(): Promise<{ level: MemoryPressureLevel; freeMemoryGB: number; usedPercent: number; appWorkingSetMB: number }>
+  }
+  plugins: {
+    getState(): Promise<PluginEngineState>
+    refreshCatalog(): Promise<PluginEngineState>
+    install(pluginId: string): Promise<PluginEngineState>
+    import(): Promise<{ canceled?: boolean; state: PluginEngineState }>
+    uninstall(pluginId: string, deleteConfig: boolean): Promise<PluginEngineState>
+    updateConfig(pluginId: string, config: Record<string, string | number | boolean>): Promise<PluginEngineState>
+    run(pluginId: string): Promise<{ ok: boolean; refreshed: number; state: PluginEngineState }>
+    onState(callback: (state: PluginEngineState) => void): () => void
   }
 }

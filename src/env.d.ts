@@ -25,7 +25,6 @@ declare global {
       getTabOrder(): string[]
       reorderTabs(fromIndex: number, toIndex: number): boolean
       targetTabIndex(floatingLeft: number, listLeft: number, slotWidth: number, tabCount: number): number
-      minuteIso(value: number | null): string | null
       getHeaderOrder(): string[]
       reorderHeaderItems(fromIndex: number, toIndex: number): boolean
       memoRoundTrip(): Promise<{ before: number; during: number; after: number; retained: boolean; layout: { editorHeight: number; wrapperHeight: number; textareaHeight: number; aligned: boolean } }>
@@ -42,6 +41,7 @@ declare global {
       showSessionEditorShowcase(): Promise<boolean>
       showUpdateShowcase(): Promise<{ visible: boolean; width: number; height: number; title: string }>
       showSettingsShowcase(): Promise<boolean>
+      showPluginsShowcase(): Promise<boolean>
       activateTabAt(index: number): Promise<string>
       performancePolicyCheck(): Promise<{ lowLiveTabs: number; lowLiveSessions: number; lowDomGuests: number; mediumBudget: number; highBudget: number; ultraHighBudget: number; fixedUnderCritical: boolean; recommendedTier: string; lowVisualMode: boolean; restoredMode: boolean }>
     }
