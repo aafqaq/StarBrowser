@@ -35,11 +35,15 @@ jobs:
           npm audit --audit-level=high
           npm run test:update
           npm run test:update:extract
+          npm run test:update:ui
           npm run test:plugins
           npm run typecheck
 
       - name: Build portable Windows folder
         run: npm run dist
+
+      - name: Test portable updater handoff and locked ASAR cleanup
+        run: npm run test:update:integration
 
       - name: Create update ZIP and compatibility manifest
         shell: pwsh

@@ -1,19 +1,8 @@
-import fs from 'node:fs'
-import fsp from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import yauzl from 'yauzl'
+import { updateFs, updateFsp } from './update-filesystem.mjs'
 
-const require = createRequire(import.meta.url)
-let archiveWriteFs = fs
-try {
-  // Electron patches node:fs so a partially written *.asar is parsed as a
-  // mounted archive. original-fs is the supported escape hatch for updater IO.
-  archiveWriteFs = require('original-fs')
-} catch {
-  // Plain Node.js tests do not expose Electron's original-fs built-in.
-}
 
 function openArchive(archivePath) {
   return new Promise((resolve, reject) => {
@@ -46,7 +35,7 @@ function safeEntryPath(root, fileName) {
 
 export async function secureExtractZip(archivePath, destinationRoot, { maxFiles = 50_000, maxUncompressedBytes = 3 * 1024 ** 3 } = {}) {
   const root = path.resolve(destinationRoot)
-  await fsp.mkdir(root, { recursive: true })
+  await updateFsp.mkdir(root, { recursive: true })
   const archive = await openArchive(path.resolve(archivePath))
   return new Promise((resolve, reject) => {
     let fileCount = 0
@@ -70,13 +59,13 @@ export async function secureExtractZip(archivePath, destinationRoot, { maxFiles 
         totalBytes += Number(entry.uncompressedSize) || 0
         if (totalBytes > maxUncompressedBytes) throw new Error('ZIP 解压总量超过安全限制')
         if (/\/$/.test(entry.fileName)) {
-          await fsp.mkdir(destination, { recursive: true })
+          await updateFsp.mkdir(destination, { recursive: true })
         } else {
           fileCount += 1
           if (fileCount > maxFiles) throw new Error('ZIP 文件数量超过安全限制')
-          await fsp.mkdir(path.dirname(destination), { recursive: true })
+          await updateFsp.mkdir(path.dirname(destination), { recursive: true })
           const input = await openEntryStream(archive, entry)
-          await pipeline(input, archiveWriteFs.createWriteStream(destination, { flags: 'wx' }))
+          await pipeline(input, updateFs.createWriteStream(destination, { flags: 'wx' }))
         }
         archive.readEntry()
       })().catch((error) => finish(error))

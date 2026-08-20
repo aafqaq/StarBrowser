@@ -36,6 +36,9 @@ jobs:
       - name: Test Electron ASAR update extraction
         run: npm run test:update:extract
 
+      - name: Test native updater progress window
+        run: npm run test:update:ui
+
       - name: Test declarative plugin engine
         run: npm run test:plugins
 
@@ -44,6 +47,9 @@ jobs:
 
       - name: Build portable Windows folder
         run: npm run dist
+
+      - name: Test portable updater handoff and locked ASAR cleanup
+        run: npm run test:update:integration
 
       - name: Create clean portable ZIP
         shell: pwsh

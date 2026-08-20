@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { secureExtractZip } from '../main/secure-extract.mjs'
+import { removeUpdateTree } from '../main/update-filesystem.mjs'
 
 const require = createRequire(import.meta.url)
 const rawFs = require('original-fs')
@@ -38,7 +39,9 @@ try {
   const result = await secureExtractZip(archivePath, destinationRoot)
   const extracted = await rawFsp.readFile(path.join(destinationRoot, 'resources', 'app.asar'))
   if (!extracted.equals(fixture) || result.fileCount !== 1) throw new Error('ASAR 解压内容或文件计数不一致')
-  console.log(JSON.stringify({ ok: true, electron: process.versions.electron, appAsarBytes: extracted.length }, null, 2))
+  await removeUpdateTree(destinationRoot)
+  if (rawFs.existsSync(destinationRoot)) throw new Error('original-fs 未能清理包含 app.asar 的更新残留')
+  console.log(JSON.stringify({ ok: true, electron: process.versions.electron, appAsarBytes: extracted.length, asarStageCleanup: true }, null, 2))
 } catch (error) {
   failure = error
   console.error(error instanceof Error ? error.stack || error.message : String(error))

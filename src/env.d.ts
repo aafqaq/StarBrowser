@@ -46,7 +46,9 @@ declare global {
       showPluginsShowcase(): Promise<boolean>
       activateTabAt(index: number): Promise<string>
       activationStabilityCheck(): Promise<{ guestStable: boolean; navigationStable: boolean; beforeGuestId: number; afterGuestId: number; beforeNavigations: number; afterNavigations: number }>
-      performancePolicyCheck(): Promise<{ lowLiveTabs: number; lowLiveSessions: number; lowDomGuests: number; mediumBudget: number; highBudget: number; ultraHighBudget: number; fixedUnderCritical: boolean; criticalRuntimeBudget: number; constrainedRuntimeBudget: number; recommendedTier: string; lowVisualMode: boolean; restoredMode: boolean }>
+      multiTabRestoreStabilityCheck(): Promise<{ primaryGuestStable: boolean; primaryNavigationStable: boolean; secondaryGuestReady: boolean; preloadRemoved: boolean }>
+      hoverPreloadCheck(): Promise<{ liveStable: boolean; domStable: boolean; apiRemoved: boolean }>
+      performancePolicyCheck(): Promise<{ lowLiveTabs: number; lowLiveSessions: number; lowDomGuests: number; mediumBudget: number; highBudget: number; ultraHighBudget: number; fixedUnderCritical: boolean; criticalRuntimeBudget: number; constrainedRuntimeBudget: number; memoryCappedBudget: number; recommendedTier: string; lowVisualMode: boolean; restoredMode: boolean }>
     }
   }
 

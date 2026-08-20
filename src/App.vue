@@ -55,9 +55,7 @@ const logoUrl = new URL('../assets/starbrowser.ico', import.meta.url).href
 let maintenanceTimer: number | null = null
 let performanceMonitorTimer: number | null = null
 let retentionTrimTimer: number | null = null
-let sessionWarmupTimer: number | null = null
 let browserPersistTimer: number | null = null
-let warmingSessionId = ''
 let poorPerformanceSamples = 0
 let adviceDismissedUntil = 0
 let sessionScrollbar: PerfectScrollbar | null = null
@@ -113,20 +111,19 @@ type PerformancePolicy = {
   maxLiveSessions: number
   maxLiveTabs: number
   maxTabsPerSession: number
+  memoryTargetMB: number
   activeFrameRate: number
   backgroundFrameRate: number
   effects: string
-  hoverWarmupMs: number
   releaseDelayMs: number
-  fullHoverWarmup: boolean
 }
 
 const performancePolicies: Record<HardwareClass, PerformancePolicy> = {
-  'ultra-low': { maxLiveSessions: 1, maxLiveTabs: 1, maxTabsPerSession: 1, activeFrameRate: 24, backgroundFrameRate: 1, effects: '极简', hoverWarmupMs: 0, releaseDelayMs: 350, fullHoverWarmup: false },
-  low: { maxLiveSessions: 1, maxLiveTabs: 2, maxTabsPerSession: 2, activeFrameRate: 30, backgroundFrameRate: 3, effects: '精简', hoverWarmupMs: 0, releaseDelayMs: 1_200, fullHoverWarmup: false },
-  balanced: { maxLiveSessions: 3, maxLiveTabs: 10, maxTabsPerSession: 5, activeFrameRate: 50, backgroundFrameRate: 12, effects: '平衡', hoverWarmupMs: 350, releaseDelayMs: 20_000, fullHoverWarmup: true },
-  high: { maxLiveSessions: 6, maxLiveTabs: 24, maxTabsPerSession: 8, activeFrameRate: 60, backgroundFrameRate: 24, effects: '完整', hoverWarmupMs: 160, releaseDelayMs: 90_000, fullHoverWarmup: true },
-  'ultra-high': { maxLiveSessions: 12, maxLiveTabs: 48, maxTabsPerSession: 12, activeFrameRate: 60, backgroundFrameRate: 30, effects: '完整', hoverWarmupMs: 80, releaseDelayMs: 180_000, fullHoverWarmup: true },
+  'ultra-low': { maxLiveSessions: 1, maxLiveTabs: 2, maxTabsPerSession: 2, memoryTargetMB: 700, activeFrameRate: 24, backgroundFrameRate: 1, effects: '极简', releaseDelayMs: 12_000 },
+  low: { maxLiveSessions: 1, maxLiveTabs: 3, maxTabsPerSession: 3, memoryTargetMB: 900, activeFrameRate: 30, backgroundFrameRate: 2, effects: '精简', releaseDelayMs: 30_000 },
+  balanced: { maxLiveSessions: 2, maxLiveTabs: 6, maxTabsPerSession: 4, memoryTargetMB: 1_300, activeFrameRate: 50, backgroundFrameRate: 6, effects: '平衡', releaseDelayMs: 60_000 },
+  high: { maxLiveSessions: 3, maxLiveTabs: 9, maxTabsPerSession: 6, memoryTargetMB: 1_800, activeFrameRate: 60, backgroundFrameRate: 12, effects: '完整', releaseDelayMs: 120_000 },
+  'ultra-high': { maxLiveSessions: 4, maxLiveTabs: 12, maxTabsPerSession: 8, memoryTargetMB: 2_400, activeFrameRate: 60, backgroundFrameRate: 16, effects: '完整', releaseDelayMs: 180_000 },
 }
 
 const themeOverrides: GlobalThemeOverrides = {
@@ -177,11 +174,11 @@ const draftPerformanceTier = computed<PerformanceTier>(() => settingsDraft.perfo
     : 'high')
 const draftPerformancePolicy = computed<PerformancePolicy>(() => performancePolicies[settingsDraft.performanceTier])
 const performanceOptions = [
-  { label: '超低配 · 1 会话 / 1 标签', value: 'ultra-low' },
-  { label: '低配 · 1 会话 / 2 标签', value: 'low' },
-  { label: '均衡 · 3 会话 / 10 标签', value: 'balanced' },
-  { label: '高配 · 6 会话 / 24 标签', value: 'high' },
-  { label: '超高配 · 12 会话 / 48 标签', value: 'ultra-high' },
+  { label: '超低配 · 1 会话 / 2 标签', value: 'ultra-low' },
+  { label: '低配 · 1 会话 / 3 标签', value: 'low' },
+  { label: '均衡 · 2 会话 / 6 标签', value: 'balanced' },
+  { label: '高配 · 3 会话 / 9 标签', value: 'high' },
+  { label: '超高配 · 4 会话 / 12 标签', value: 'ultra-high' },
 ]
 const hardwareClassOrder: HardwareClass[] = ['ultra-low', 'low', 'balanced', 'high', 'ultra-high']
 const hardwareClassLabels: Record<HardwareClass, string> = { 'ultra-low': '超低配', low: '低配', balanced: '均衡', high: '高配', 'ultra-high': '超高配' }
@@ -348,22 +345,34 @@ function touchRecent(list: string[], id: string) {
   list.unshift(id)
 }
 
+function appMemoryLiveBudget(policy = currentPerformancePolicy.value) {
+  const guestCount = Math.max(1, liveTabIds.value.length)
+  const workingSet = Math.max(0, memoryStatus.value.appWorkingSetMB)
+  if (!workingSet) return policy.maxLiveTabs
+  const estimatedBaseMB = 320
+  const estimatedPerGuestMB = Math.max(110, (workingSet - estimatedBaseMB) / guestCount)
+  return Math.max(1, Math.floor(Math.max(estimatedPerGuestMB, policy.memoryTargetMB - estimatedBaseMB) / estimatedPerGuestMB))
+}
+
 function runtimeLiveBudget(policy = currentPerformancePolicy.value) {
   if (memoryStatus.value.level === 'critical') return 1
-  if (memoryStatus.value.level === 'constrained') return Math.max(1, Math.ceil(policy.maxLiveTabs * .5))
-  return policy.maxLiveTabs
+  const memoryBudget = appMemoryLiveBudget(policy)
+  if (memoryStatus.value.level === 'constrained') return Math.max(1, Math.min(memoryBudget, Math.ceil(policy.maxLiveTabs * .5)))
+  return Math.min(policy.maxLiveTabs, memoryBudget)
 }
 
 function runtimeSessionBudget(policy = currentPerformancePolicy.value) {
   if (memoryStatus.value.level === 'critical') return 1
-  if (memoryStatus.value.level === 'constrained') return Math.max(1, Math.ceil(policy.maxLiveSessions * .5))
-  return policy.maxLiveSessions
+  const liveBudget = runtimeLiveBudget(policy)
+  if (memoryStatus.value.level === 'constrained') return Math.max(1, Math.min(liveBudget, Math.ceil(policy.maxLiveSessions * .5)))
+  return Math.min(policy.maxLiveSessions, liveBudget)
 }
 
 function runtimePerSessionBudget(policy = currentPerformancePolicy.value) {
   if (memoryStatus.value.level === 'critical') return 1
-  if (memoryStatus.value.level === 'constrained') return Math.max(1, Math.ceil(policy.maxTabsPerSession * .5))
-  return policy.maxTabsPerSession
+  const liveBudget = runtimeLiveBudget(policy)
+  if (memoryStatus.value.level === 'constrained') return Math.max(1, Math.min(liveBudget, Math.ceil(policy.maxTabsPerSession * .5)))
+  return Math.min(policy.maxTabsPerSession, liveBudget)
 }
 
 function trimLiveTabs() {
@@ -460,40 +469,16 @@ function releasePointerButtonFocus(event: PointerEvent) {
   }, 0)
 }
 
-function scheduleSessionWarmup(session: BrowserSession) {
-  if (session.id === activeSession.value?.id) return
-  if (sessionWarmupTimer) window.clearTimeout(sessionWarmupTimer)
-  warmingSessionId = session.id
-  const tab = session.tabs.find((item) => item.id === session.activeTabId) || session.tabs[0]
-  if (!tab) return
-  void api.browser.preconnect(session.id, tab.url)
-  const policy = currentPerformancePolicy.value
-  if (!policy.fullHoverWarmup) return
-  sessionWarmupTimer = window.setTimeout(() => {
-    sessionWarmupTimer = null
-    if (warmingSessionId !== session.id || !state.value?.sessions.some((item) => item.id === session.id)) return
-    ensureLiveTab(tab, session)
-    if (retentionTrimTimer) window.clearTimeout(retentionTrimTimer)
-    retentionTrimTimer = null
-  }, policy.hoverWarmupMs)
-}
-
-function cancelSessionWarmup(sessionId: string) {
-  if (warmingSessionId !== sessionId) return
-  warmingSessionId = ''
-  if (sessionWarmupTimer) window.clearTimeout(sessionWarmupTimer)
-  sessionWarmupTimer = null
-  scheduleRetentionTrim(120)
-}
-
 async function refreshMemoryStatus() {
   const probeStarted = performance.now()
   await new Promise((resolve) => window.setTimeout(resolve, 120))
   const eventLoopLag = Math.max(0, performance.now() - probeStarted - 120)
   const next = await api.system.memoryStatus()
   const previousLevel = memoryStatus.value.level
+  const previousBudget = runtimeLiveBudget()
   memoryStatus.value = next
-  if (next.level !== 'normal' && next.level !== previousLevel) {
+  const nextBudget = runtimeLiveBudget()
+  if ((next.level !== 'normal' && next.level !== previousLevel) || nextBudget < previousBudget || liveTabIds.value.length > nextBudget) {
     trimLiveTabs()
     void syncGuestPerformance()
   }
@@ -547,11 +532,6 @@ async function activateTab(tab: BrowserTab) {
 
 async function activateSession(session: BrowserSession) {
   if (!state.value) return
-  if (warmingSessionId === session.id) {
-    warmingSessionId = ''
-    if (sessionWarmupTimer) window.clearTimeout(sessionWarmupTimer)
-    sessionWarmupTimer = null
-  }
   state.value.activeSessionId = session.id
   touchRecent(recentSessionIds.value, session.id)
   await nextTick()
@@ -1438,7 +1418,7 @@ function formatUpdateBytes(value: number) {
 
 function handleUpdateStatus(status: UpdateStatus) {
   updateInfo.value = status
-  if (status.phase === 'available' && !modalShown.value) void openModal('update')
+  if ((status.phase === 'available' || status.phase === 'error') && !modalShown.value) void openModal('update')
 }
 
 async function checkForUpdatesManually() {
@@ -1593,8 +1573,6 @@ function webviewReady(event: Event) {
     canGoBack: target.view.canGoBack(),
     canGoForward: target.view.canGoForward(),
   })
-  if (!readyTabIds.value.includes(target.tab.id)) readyTabIds.value.push(target.tab.id)
-  if (target.tab.id === activeTab.value?.id) scheduleRetentionTrim(120)
   void syncGuestPerformance()
 }
 
@@ -1669,6 +1647,7 @@ onMounted(async () => {
   machineProfile.value = detectedProfile
   pluginState.value = loadedPlugins
   updateInfo.value = await api.update.getStatus()
+  if (updateInfo.value.phase === 'error') await openModal('update')
   await nextTick()
   if (sessionList.value) sessionScrollbar = new PerfectScrollbar(sessionList.value, { suppressScrollX: true, wheelPropagation: false })
   const session = activeSession.value
@@ -1963,9 +1942,50 @@ onMounted(async () => {
           afterNavigations,
         }
       },
+      multiTabRestoreStabilityCheck: async () => {
+        const session = activeSession.value
+        if (!session || session.tabs.length < 2) return { primaryGuestStable: false, primaryNavigationStable: false, secondaryGuestReady: false, preloadRemoved: false }
+        const primary = session.tabs[0]
+        const secondary = session.tabs[1]
+        await activateTab(primary)
+        await nextTick()
+        const primaryGuestBefore = await waitForGuestId(primary.id)
+        await new Promise((resolve) => window.setTimeout(resolve, 350))
+        const primaryNavigationsBefore = mainFrameNavigationCounts.get(primary.id) || 0
+        removeLiveTab(secondary.id)
+        await nextTick()
+        await activateTab(secondary)
+        const secondaryGuest = await waitForGuestId(secondary.id)
+        await new Promise((resolve) => window.setTimeout(resolve, 900))
+        const primaryGuestAfter = guestIdFor(primary.id)
+        const primaryNavigationsAfter = mainFrameNavigationCounts.get(primary.id) || 0
+        await activateTab(primary)
+        return {
+          primaryGuestStable: primaryGuestBefore > 0 && primaryGuestBefore === primaryGuestAfter,
+          primaryNavigationStable: primaryNavigationsBefore === primaryNavigationsAfter,
+          secondaryGuestReady: secondaryGuest > 0,
+          preloadRemoved: !('preconnect' in api.browser),
+        }
+      },
+      hoverPreloadCheck: async () => {
+        if (!state.value) return { liveStable: false, domStable: false, apiRemoved: false }
+        const created = [createSession('悬停内存测试一'), createSession('悬停内存测试二'), createSession('悬停内存测试三')]
+        state.value.sessions.push(...created)
+        await nextTick()
+        const liveBefore = liveTabIds.value.length
+        const domBefore = document.querySelectorAll('webview.browser-webview').length
+        const cards = [...document.querySelectorAll<HTMLElement>('.session-card')].filter((card) => card.textContent?.includes('悬停内存测试'))
+        for (const card of cards) card.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
+        await new Promise((resolve) => window.setTimeout(resolve, 700))
+        const liveAfter = liveTabIds.value.length
+        const domAfter = document.querySelectorAll('webview.browser-webview').length
+        state.value.sessions = state.value.sessions.filter((session) => !created.some((item) => item.id === session.id))
+        await nextTick()
+        return { liveStable: liveBefore === liveAfter, domStable: domBefore === domAfter, apiRemoved: !('preconnect' in api.browser) }
+      },
       performancePolicyCheck: async () => {
         const session = activeSession.value
-        if (!state.value || !session) return { lowLiveTabs: 99, lowLiveSessions: 99, lowDomGuests: 99, mediumBudget: 0, highBudget: 0, ultraHighBudget: 0, fixedUnderCritical: false, criticalRuntimeBudget: 99, constrainedRuntimeBudget: 99, recommendedTier: '', lowVisualMode: false, restoredMode: false }
+        if (!state.value || !session) return { lowLiveTabs: 99, lowLiveSessions: 99, lowDomGuests: 99, mediumBudget: 0, highBudget: 0, ultraHighBudget: 0, fixedUnderCritical: false, criticalRuntimeBudget: 99, constrainedRuntimeBudget: 99, memoryCappedBudget: 99, recommendedTier: '', lowVisualMode: false, restoredMode: false }
         const originalTier = state.value.settings.performanceTier
         const originalSource = state.value.settings.performanceSelectionSource
         const originalActiveTabId = session.activeTabId
@@ -1976,6 +1996,8 @@ onMounted(async () => {
         const criticalRuntimeBudget = runtimeLiveBudget()
         memoryStatus.value = { ...originalMemoryStatus, level: 'constrained' }
         const constrainedRuntimeBudget = runtimeLiveBudget()
+        memoryStatus.value = { ...originalMemoryStatus, level: 'normal', appWorkingSetMB: 3_000 }
+        const memoryCappedBudget = runtimeLiveBudget()
         memoryStatus.value = originalMemoryStatus
         const created = [createTab(), createTab(), createTab(), createTab()]
         session.tabs.push(...created)
@@ -2010,6 +2032,7 @@ onMounted(async () => {
           fixedUnderCritical,
           criticalRuntimeBudget,
           constrainedRuntimeBudget,
+          memoryCappedBudget,
           recommendedTier: recommendedLowerTier('ultra-high', 'critical'),
           lowVisualMode,
           restoredMode: state.value.settings.performanceTier === originalTier && state.value.settings.performanceSelectionSource === originalSource,
@@ -2051,7 +2074,6 @@ onBeforeUnmount(() => {
   if (maintenanceTimer) window.clearInterval(maintenanceTimer)
   if (performanceMonitorTimer) window.clearInterval(performanceMonitorTimer)
   if (retentionTrimTimer) window.clearTimeout(retentionTrimTimer)
-  if (sessionWarmupTimer) window.clearTimeout(sessionWarmupTimer)
   if (browserPersistTimer) flushBrowserPersist()
   if (toastTimer.value) window.clearTimeout(toastTimer.value)
   sessionScrollbar?.destroy()
@@ -2129,7 +2151,7 @@ onBeforeUnmount(() => {
           </n-button>
           <div v-if="!sidebarCollapsed" class="section-label">会话</div>
           <div ref="sessionList" class="session-list">
-            <div v-for="session in state.sessions" :key="session.id" class="session-card" :class="{ active: session.id === activeSession?.id }" @pointerenter="scheduleSessionWarmup(session)" @pointerleave="cancelSessionWarmup(session.id)" @click="activateSession(session)">
+            <div v-for="session in state.sessions" :key="session.id" class="session-card" :class="{ active: session.id === activeSession?.id }" @click="activateSession(session)">
               <template v-if="!sidebarCollapsed">
                 <div class="session-card-main">
                   <div class="session-title" :title="session.name">{{ session.name }}</div>
@@ -2345,7 +2367,7 @@ onBeforeUnmount(() => {
             <p class="form-hint">被释放的页面再次切换时会重新载入，但 Cookie、本地存储、IndexedDB 与登录信息仍保存在隔离数据目录，不会因此删除。</p>
             <div class="settings-update-card">
               <span class="settings-update-icon"><n-icon><RocketOutline /></n-icon></span>
-              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.2' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
+              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.3' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
               <n-button size="small" secondary @click="openGithubProject"><template #icon><n-icon><StarOutline /></n-icon></template>GitHub</n-button>
               <n-button size="small" type="primary" :loading="updateInfo.phase === 'checking'" @click="checkForUpdatesManually">检查更新</n-button>
             </div>

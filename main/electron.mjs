@@ -10,8 +10,9 @@ import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 import { secureExtractZip } from './secure-extract.mjs'
 import { PluginService } from './plugin-service.mjs'
+import { removeUpdateTree, updateFs, updateFsp } from './update-filesystem.mjs'
 import {
-  APP_COMPATIBILITY, UPDATE_API_URL, UPDATE_REPOSITORY, buildApplyUpdatePowerShell,
+  APP_COMPATIBILITY, UPDATE_API_URL, UPDATE_REPOSITORY, buildApplyUpdatePowerShell, buildUpdateUiPowerShell,
   legacyProgramManifest, parseProgramManifest, parseReleaseCandidate, safeVersion,
 } from './update-service.mjs'
 
@@ -19,6 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '..')
 const smokeMode = process.env.STARBROWSER_SMOKE === '1'
 const captureMode = process.env.STARBROWSER_CAPTURE === '1'
+const updateIntegrationMode = process.env.STARBROWSER_UPDATE_INTEGRATION === '1'
 const captureDir = process.env.STARBROWSER_CAPTURE_DIR ? path.resolve(process.env.STARBROWSER_CAPTURE_DIR) : ''
 const legacyCookieImportFile = process.env.STARBROWSER_LEGACY_COOKIE_IMPORT_FILE
   ? path.resolve(process.env.STARBROWSER_LEGACY_COOKIE_IMPORT_FILE)
@@ -40,6 +42,9 @@ const stateBackupFile = path.join(dataRoot, 'state.backup.json')
 const transferWorkerPath = path.join(__dirname, 'session-transfer-worker.mjs')
 const compatibilityFile = path.join(dataRoot, 'compatibility.json')
 const updatesBaseRoot = path.join(dataRoot, 'updates')
+const updateFailureFile = path.join(dataRoot, 'update-error.log')
+const updateCleanupFile = path.join(dataRoot, 'update-cleanup-pending.log')
+const updateProgressFile = path.join(dataRoot, 'update-progress.json')
 const postUpdateToken = (process.argv.find((argument) => argument.startsWith('--post-update-token=')) || '').split('=')[1] || ''
 const postUpdateVersion = (process.argv.find((argument) => argument.startsWith('--post-update-version=')) || '').split('=')[1] || ''
 
@@ -63,11 +68,12 @@ let updateCandidate = null
 let downloadedUpdate = null
 let updateWork = null
 let pluginService = null
+let staleUpdateCleanup = Promise.resolve()
 
 const PERFORMANCE_POLICIES = {
-  low: { activeFrameRate: 30, backgroundFrameRate: 5 },
-  medium: { activeFrameRate: 45, backgroundFrameRate: 12 },
-  high: { activeFrameRate: 60, backgroundFrameRate: 20 },
+  low: { activeFrameRate: 30, backgroundFrameRate: 2 },
+  medium: { activeFrameRate: 50, backgroundFrameRate: 6 },
+  high: { activeFrameRate: 60, backgroundFrameRate: 16 },
 }
 
 function detectPerformanceProfile() {
@@ -134,17 +140,6 @@ function applyGuestPerformance(payload = {}) {
     } catch {
       // A guest can disappear while a retention update is being applied.
     }
-  }
-}
-
-function preconnectSession(sessionId, targetUrl) {
-  try {
-    const url = new URL(String(targetUrl || ''))
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
-    configureSession(sessionId).preconnect({ url: url.origin, numSockets: 1 })
-    return true
-  } catch {
-    return false
   }
 }
 
@@ -635,6 +630,7 @@ async function fetchJson(url) {
 async function checkForUpdates({ manual = false } = {}) {
   if (updateWork) return publicUpdateStatus()
   if (!app.isPackaged && !smokeMode) return setUpdateStatus({ phase: 'unsupported', manual, error: '开发模式不执行自动更新' })
+  if (manual) await updateFsp.rm(updateFailureFile, { force: true }).catch(() => {})
   setUpdateStatus({ phase: 'checking', manual, progress: 0, error: '' })
   try {
     const release = await fetchJson(UPDATE_API_URL)
@@ -666,18 +662,52 @@ function assertUpdateStage(versionRoot) {
   if (!resolvedStage.toLowerCase().startsWith(`${resolvedBase.toLowerCase()}${path.sep}`)) throw new Error('更新临时目录越界')
 }
 
+async function cleanupStaleUpdateStages() {
+  if (postUpdateToken) return
+  await updateFsp.mkdir(updatesBaseRoot, { recursive: true })
+  const entries = await updateFsp.readdir(updatesBaseRoot, { withFileTypes: true })
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const stage = path.join(updatesBaseRoot, entry.name)
+    assertUpdateStage(stage)
+    await removeUpdateTree(stage)
+  }
+  await updateFsp.rm(updateCleanupFile, { force: true }).catch(() => {})
+  await updateFsp.rm(updateProgressFile, { force: true }).catch(() => {})
+}
+
+async function loadPreviousUpdateFailure() {
+  const message = await updateFsp.readFile(updateFailureFile, 'utf8').catch(() => '')
+  if (!message.trim()) return
+  updateStatus = {
+    phase: 'error', currentVersion: app.getVersion(), progress: 0, manual: true,
+    error: `上次更新未能完成，当前版本已保留。\n${message.trim()}`,
+  }
+}
+
+async function waitForUpdateHandoff(handoffPath, updater, timeoutMs = 6_000) {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (updateFs.existsSync(handoffPath)) return true
+    if (updater.exitCode !== null) throw new Error(`更新器提前退出（${updater.exitCode}）`)
+    await delay(100)
+  }
+  throw new Error('更新器接管超时，当前软件保持运行，请重试')
+}
+
 async function downloadUpdate() {
   if (!updateCandidate) throw new Error('没有可下载的更新')
   if (downloadedUpdate) return setUpdateStatus({ phase: 'downloaded', progress: 100 })
   if (updateWork) return updateWork
   updateWork = (async () => {
+    await staleUpdateCleanup
     const version = safeVersion(updateCandidate.version)
     const versionRoot = path.join(updatesBaseRoot, version)
     const archivePath = path.join(versionRoot, updateCandidate.asset.name)
     const payloadRoot = path.join(versionRoot, 'payload')
     assertUpdateStage(versionRoot)
-    await fsp.rm(versionRoot, { recursive: true, force: true })
-    await fsp.mkdir(versionRoot, { recursive: true })
+    await removeUpdateTree(versionRoot)
+    await updateFsp.mkdir(versionRoot, { recursive: true })
     const disk = fs.statfsSync(dataRoot)
     const freeBytes = Number(disk.bavail) * Number(disk.bsize)
     const requiredBytes = Math.max(512 * 1024 ** 2, updateCandidate.asset.size * 3)
@@ -687,7 +717,7 @@ async function downloadUpdate() {
       redirect: 'follow',
     })
     if (!response.ok || !response.body) throw new Error(`更新包下载失败（${response.status}）`)
-    const file = await fsp.open(archivePath, 'w')
+    const file = await updateFsp.open(archivePath, 'w')
     const hash = createHash('sha256')
     const reader = response.body.getReader()
     const startedAt = Date.now()
@@ -718,12 +748,12 @@ async function downloadUpdate() {
     }
     if (hash.digest('hex').toLowerCase() !== updateCandidate.asset.sha256) throw new Error('更新包校验失败，文件可能不完整')
     setUpdateStatus({ phase: 'extracting', progress: 99, transferred, total: transferred, speed: 0 })
-    await fsp.mkdir(payloadRoot, { recursive: true })
+    await updateFsp.mkdir(payloadRoot, { recursive: true })
     await secureExtractZip(archivePath, payloadRoot)
-    const programManifest = parseProgramManifest(JSON.parse(await fsp.readFile(path.join(payloadRoot, 'starbrowser-update.json'), 'utf8')))
+    const programManifest = parseProgramManifest(JSON.parse(await updateFsp.readFile(path.join(payloadRoot, 'starbrowser-update.json'), 'utf8')))
     if (safeVersion(programManifest.version) !== version) throw new Error('更新包版本与发布版本不一致')
     for (const name of programManifest.ownedTopLevel) {
-      if (!fs.existsSync(path.join(payloadRoot, name))) throw new Error(`更新包缺少程序文件：${name}`)
+      if (!updateFs.existsSync(path.join(payloadRoot, name))) throw new Error(`更新包缺少程序文件：${name}`)
     }
     downloadedUpdate = { versionRoot, payloadRoot, archivePath, programManifest }
     return setUpdateStatus({ phase: 'downloaded', progress: 100, transferred, total: transferred, speed: 0, error: '' })
@@ -732,7 +762,7 @@ async function downloadUpdate() {
     if (updateCandidate) {
       const failedRoot = path.join(updatesBaseRoot, safeVersion(updateCandidate.version))
       assertUpdateStage(failedRoot)
-      await fsp.rm(failedRoot, { recursive: true, force: true }).catch(() => {})
+      await removeUpdateTree(failedRoot).catch(() => {})
     }
     return setUpdateStatus({ phase: 'error', error: message, speed: 0 })
   }).finally(() => { updateWork = null })
@@ -773,6 +803,7 @@ async function installDownloadedUpdate() {
   await snapshotUpdateSafety(downloadedUpdate.versionRoot)
   const oldProgramManifest = await readInstalledProgramManifest()
   const token = randomBytes(16).toString('hex')
+  const handoffPath = path.join(downloadedUpdate.versionRoot, `handoff-${token}.ready`)
   const script = buildApplyUpdatePowerShell({
     targetRoot: portableRoot,
     payloadRoot: downloadedUpdate.payloadRoot,
@@ -782,16 +813,40 @@ async function installDownloadedUpdate() {
     oldOwnedTopLevel: oldProgramManifest.ownedTopLevel,
     newOwnedTopLevel: downloadedUpdate.programManifest.ownedTopLevel,
   })
-  const scriptPath = path.join(downloadedUpdate.versionRoot, 'apply-update.ps1')
-  await fsp.writeFile(scriptPath, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(script, 'utf16le')]))
+  const workerScriptPath = path.join(downloadedUpdate.versionRoot, 'apply-update-worker.ps1')
+  const uiScriptPath = path.join(downloadedUpdate.versionRoot, 'apply-update.ps1')
+  const uiScript = buildUpdateUiPowerShell({
+    workerScript: workerScriptPath,
+    progressFile: updateProgressFile,
+    failureFile: updateFailureFile,
+    version: downloadedUpdate.programManifest.version,
+  })
+  await updateFsp.rm(handoffPath, { force: true }).catch(() => {})
+  await updateFsp.rm(updateProgressFile, { force: true }).catch(() => {})
+  await updateFsp.writeFile(workerScriptPath, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(script, 'utf16le')]))
+  await updateFsp.writeFile(uiScriptPath, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(uiScript, 'utf16le')]))
+  const launchScriptPath = updateIntegrationMode ? workerScriptPath : uiScriptPath
   const updater = spawn('powershell.exe', [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-    '-WindowStyle', 'Hidden', '-File', scriptPath,
+    ...(updateIntegrationMode ? [] : ['-STA']),
+    '-WindowStyle', 'Hidden', '-File', launchScriptPath,
   ], { detached: true, windowsHide: true, stdio: 'ignore', cwd: os.tmpdir() })
+  await new Promise((resolve, reject) => {
+    updater.once('spawn', resolve)
+    updater.once('error', reject)
+  })
+  try {
+    await waitForUpdateHandoff(handoffPath, updater)
+  } catch (error) {
+    try { updater.kill() } catch { /* It may already have exited. */ }
+    return setUpdateStatus({ phase: 'error', error: error instanceof Error ? error.message : String(error) })
+  }
   updater.unref()
   quitting = true
   quitPrepared = true
+  mainWindow?.hide()
   setTimeout(() => app.quit(), 120)
+  setTimeout(() => app.exit(0), 5_000).unref()
   return { ok: true }
 }
 
@@ -822,7 +877,7 @@ async function markPostUpdateHealthy() {
   const versionRoot = path.join(updatesBaseRoot, postUpdateVersion)
   assertUpdateStage(versionRoot)
   await writeCompatibilityLedger()
-  await fsp.writeFile(path.join(versionRoot, `health-${postUpdateToken}.ok`), new Date().toISOString(), 'utf8')
+  await updateFsp.writeFile(path.join(versionRoot, `health-${postUpdateToken}.ok`), new Date().toISOString(), 'utf8')
 }
 
 function partitionFor(sessionId) {
@@ -959,8 +1014,16 @@ function createWindow() {
   })
   mainWindow.webContents.on('render-process-gone', (_event, details) => console.error('Renderer process gone', details))
   mainWindow.webContents.once('did-finish-load', () => {
-    if (postUpdateToken) void markPostUpdateHealthy().catch((error) => console.error('Post-update health check failed', error))
-    if (!smokeMode && !captureMode && !postUpdateToken) setTimeout(() => void checkForUpdates({ manual: false }), 3_500).unref()
+    if (postUpdateToken) void markPostUpdateHealthy()
+      .catch((error) => console.error('Post-update health check failed', error))
+      .finally(() => {
+        if (updateIntegrationMode) {
+          quitting = true
+          quitPrepared = true
+          app.exit(0)
+        }
+      })
+    if (!smokeMode && !captureMode && !postUpdateToken && updateStatus.phase !== 'error') setTimeout(() => void checkForUpdates({ manual: false }), 3_500).unref()
   })
   if (process.env.VITE_DEV_SERVER_URL) void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   else void mainWindow.loadFile(path.join(projectRoot, 'dist-renderer', 'index.html'), smokeMode || captureMode ? { query: { smoke: '1' } } : undefined)
@@ -969,7 +1032,7 @@ function createWindow() {
     if (!smokeMode && !captureMode) mainWindow.show()
   })
   if (smokeMode) mainWindow.webContents.once('did-finish-load', () => void runSmokeCheck())
-  if (captureMode) mainWindow.webContents.once('did-finish-load', () => void runReadmeCapture())
+  if (captureMode && !updateIntegrationMode) mainWindow.webContents.once('did-finish-load', () => void runReadmeCapture())
   mainWindow.on('resize', () => send('window:changed', { maximized: mainWindow.isMaximized(), fullscreen: mainWindow.isFullScreen() }))
   mainWindow.on('maximize', () => send('window:changed', { maximized: true, fullscreen: false }))
   mainWindow.on('unmaximize', () => send('window:changed', { maximized: false, fullscreen: false }))
@@ -1418,7 +1481,7 @@ async function runSmokeCheck() {
       const result = {
         visible: Boolean(modal && rect && rect.width > 500 && rect.height > 300),
         insideViewport: Boolean(rect && rect.left >= 8 && rect.top >= 8 && rect.right <= innerWidth - 8 && rect.bottom <= innerHeight - 8),
-        versionShown: text.includes('v1.8.2') && text.includes('v9.9.9'),
+        versionShown: text.includes('v1.8.3') && text.includes('v9.9.9'),
         actionsShown: ['忽略此版本', '稍后', '下载更新'].every((label) => text.includes(label)),
         safetyShown: ['SHA-256 完整性校验', 'data 永不覆盖', '启动失败自动回滚', '兼容迁移清单'].every((label) => text.includes(label)),
         progressReady: Boolean(document.querySelector('[data-testid="update-modal"] .update-dialog'))
@@ -1431,8 +1494,10 @@ async function runSmokeCheck() {
     const spellcheckDisabled = Boolean(activeAfterSwitch && !activeAfterSwitch.isDestroyed() && !activeAfterSwitch.session.isSpellCheckerEnabled() && !mainWindow.webContents.session.isSpellCheckerEnabled())
     const rendererContextMenuReady = mainWindow.webContents.listenerCount('context-menu') > 0
     const activationStability = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.activationStabilityCheck()`)
+    const multiTabRestoreStability = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.multiTabRestoreStabilityCheck()`)
+    const hoverPreload = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.hoverPreloadCheck()`)
     const performancePolicy = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.performancePolicyCheck()`)
-    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, sessionSwitch, expiryBadge, mixedWidthTabCrossing, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, sessionForm, inputLayer, memoAndChrome, favoritesUi, pluginUi, recycleOverlay, updateUi, activationStability, performancePolicy }
+    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, sessionSwitch, expiryBadge, mixedWidthTabCrossing, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, sessionForm, inputLayer, memoAndChrome, favoritesUi, pluginUi, recycleOverlay, updateUi, activationStability, multiTabRestoreStability, hoverPreload, performancePolicy }
     report.transferArchive = transferArchive
     report.browser = {
       engine: 'dom-webview',
@@ -1467,9 +1532,11 @@ async function runSmokeCheck() {
       recycleOverlay.visible && recycleOverlay.completeText && recycleOverlay.insideViewport && recycleOverlay.teleported &&
       updateUi.visible && updateUi.insideViewport && updateUi.versionShown && updateUi.actionsShown && updateUi.safetyShown && updateUi.progressReady &&
       activationStability.guestStable && activationStability.navigationStable &&
-      performancePolicy.lowLiveTabs === 1 && performancePolicy.lowLiveSessions === 1 && performancePolicy.lowDomGuests === 1 &&
-      performancePolicy.mediumBudget === 10 && performancePolicy.highBudget === 24 && performancePolicy.ultraHighBudget === 48 &&
-      performancePolicy.fixedUnderCritical && performancePolicy.criticalRuntimeBudget === 1 && performancePolicy.constrainedRuntimeBudget === 12 &&
+      multiTabRestoreStability.primaryGuestStable && multiTabRestoreStability.primaryNavigationStable && multiTabRestoreStability.secondaryGuestReady && multiTabRestoreStability.preloadRemoved &&
+      hoverPreload.liveStable && hoverPreload.domStable && hoverPreload.apiRemoved &&
+      performancePolicy.lowLiveTabs === 2 && performancePolicy.lowLiveSessions === 1 && performancePolicy.lowDomGuests === 2 &&
+      performancePolicy.mediumBudget === 6 && performancePolicy.highBudget === 9 && performancePolicy.ultraHighBudget === 12 &&
+      performancePolicy.fixedUnderCritical && performancePolicy.criticalRuntimeBudget === 1 && performancePolicy.constrainedRuntimeBudget === 5 && performancePolicy.memoryCappedBudget <= 2 &&
       performancePolicy.recommendedTier === 'balanced' && performancePolicy.lowVisualMode && performancePolicy.restoredMode &&
       transferArchive.formatVersion === 1 && transferArchive.algorithmVersion === 1 && transferArchive.sessionName === '加密会话测试' &&
       transferArchive.cookieCount === 1 && transferArchive.credentialRestored && transferArchive.cacheExcluded && transferArchive.wrongPasswordRejected &&
@@ -1529,7 +1596,6 @@ function registerIpc() {
   ipcMain.handle('browser:clear-session', (_event, sessionId) => clearSessionData(sessionId))
   ipcMain.handle('browser:export-session', (_event, payload) => exportSessionArchive(payload?.sessionId, payload?.password))
   ipcMain.handle('browser:import-session', (_event, payload) => importSessionArchive(payload?.password))
-  ipcMain.handle('browser:preconnect', (_event, payload) => preconnectSession(payload?.sessionId, payload?.url))
   ipcMain.on('browser:apply-performance', (event, payload) => {
     if (event.sender !== mainWindow?.webContents) return
     applyGuestPerformance(payload)
@@ -1596,6 +1662,13 @@ if (!hasLock) {
 } else {
   app.on('second-instance', restoreFromTray)
   app.whenReady().then(async () => {
+    await loadPreviousUpdateFailure()
+    staleUpdateCleanup = cleanupStaleUpdateStages().catch((error) => {
+      if (updateStatus.phase !== 'error') setUpdateStatus({
+        phase: 'error', manual: true,
+        error: `上次更新临时文件仍被系统占用，当前程序和 data 未受影响。\n${error instanceof Error ? error.message : String(error)}`,
+      })
+    })
     try {
       state = await loadState()
     } catch (error) {
