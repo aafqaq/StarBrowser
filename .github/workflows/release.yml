@@ -34,6 +34,7 @@ jobs:
           npm ci
           npm audit --audit-level=high
           npm run test:update
+          npm run test:update:extract
           npm run test:plugins
           npm run typecheck
 

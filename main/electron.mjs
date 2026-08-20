@@ -1388,7 +1388,7 @@ async function runSmokeCheck() {
       const result = {
         visible: Boolean(modal && rect && rect.width > 500 && rect.height > 300),
         insideViewport: Boolean(rect && rect.left >= 8 && rect.top >= 8 && rect.right <= innerWidth - 8 && rect.bottom <= innerHeight - 8),
-        versionShown: text.includes('v1.8.0') && text.includes('v9.9.9'),
+        versionShown: text.includes('v1.8.1') && text.includes('v9.9.9'),
         actionsShown: ['忽略此版本', '稍后', '下载更新'].every((label) => text.includes(label)),
         safetyShown: ['SHA-256 完整性校验', 'data 永不覆盖', '启动失败自动回滚', '兼容迁移清单'].every((label) => text.includes(label)),
         progressReady: Boolean(document.querySelector('[data-testid="update-modal"] .update-dialog'))

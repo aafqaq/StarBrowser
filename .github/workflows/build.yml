@@ -33,6 +33,9 @@ jobs:
       - name: Test update safety core
         run: npm run test:update
 
+      - name: Test Electron ASAR update extraction
+        run: npm run test:update:extract
+
       - name: Test declarative plugin engine
         run: npm run test:plugins
 

@@ -1,8 +1,19 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import yauzl from 'yauzl'
+
+const require = createRequire(import.meta.url)
+let archiveWriteFs = fs
+try {
+  // Electron patches node:fs so a partially written *.asar is parsed as a
+  // mounted archive. original-fs is the supported escape hatch for updater IO.
+  archiveWriteFs = require('original-fs')
+} catch {
+  // Plain Node.js tests do not expose Electron's original-fs built-in.
+}
 
 function openArchive(archivePath) {
   return new Promise((resolve, reject) => {
@@ -65,7 +76,7 @@ export async function secureExtractZip(archivePath, destinationRoot, { maxFiles 
           if (fileCount > maxFiles) throw new Error('ZIP 文件数量超过安全限制')
           await fsp.mkdir(path.dirname(destination), { recursive: true })
           const input = await openEntryStream(archive, entry)
-          await pipeline(input, fs.createWriteStream(destination, { flags: 'wx' }))
+          await pipeline(input, archiveWriteFs.createWriteStream(destination, { flags: 'wx' }))
         }
         archive.readEntry()
       })().catch((error) => finish(error))
