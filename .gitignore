@@ -9,6 +9,7 @@ data/
 Thumbs.db
 .vite/
 .vscode/
+*.code-workspace
 .workspace/
 screenshots-private/
 docs/screenshots/capture-result.json

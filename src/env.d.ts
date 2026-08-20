@@ -36,6 +36,10 @@ declare global {
       prepareRecycleOverlayCheck(): Promise<string>
       cleanupRecycleOverlayCheck(sessionId: string): Promise<boolean>
       prepareShowcase(): Promise<boolean>
+      showShowcaseSession(sessionIndex: number, tabIndex: number): Promise<boolean>
+      showFavoritesShowcase(): Promise<boolean>
+      showMemoShowcase(): Promise<boolean>
+      showSessionEditorShowcase(): Promise<boolean>
       showUpdateShowcase(): Promise<{ visible: boolean; width: number; height: number; title: string }>
       showSettingsShowcase(): Promise<boolean>
       activateTabAt(index: number): Promise<string>

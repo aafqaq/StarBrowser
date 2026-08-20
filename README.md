@@ -11,8 +11,8 @@
 </p>
 
 <p align="center">
-  <b>一个文件夹，多个互不干扰的浏览器身份。</b><br />
-  Chromium 内核 · Windows 10/11 · 免安装 · 会话隔离 · 数据随身携带
+  <b>在同一台电脑上同时登录多个网站账号，登录状态互不串号。</b><br />
+  每个会话都是独立的浏览器身份，同一会话内的标签页则自然共享 Cookie 与本地存储。
 </p>
 
 <p align="center">
@@ -29,43 +29,61 @@
 
 ---
 
-## ✨ 一眼看看 StarBrowser
+## ✨ 这就是 StarBrowser
+
+StarBrowser 面向需要同时管理多个网页登录身份的人：一个窗口左侧切换会话，右侧直接浏览网页。工作账号、个人账号、店铺账号和临时测试环境各自保存登录状态，不需要反复退出账号、开隐私窗口或准备多个浏览器。
 
 <p align="center">
-  <img src="docs/starbrowser-demo.gif" alt="StarBrowser 界面、设置与自动更新演示" width="960" />
+  <img src="docs/starbrowser-demo.gif" alt="StarBrowser 会话切换、收藏夹、备注与性能设置演示" width="960" />
 </p>
 
-> 截图和动图均由独立的全新临时数据目录自动生成，不包含开发者或用户的真实会话、账号、收藏和浏览记录。
+<p align="center">
+  <code>多账号运营</code>&nbsp;&nbsp; <code>社交媒体矩阵</code>&nbsp;&nbsp; <code>开发与测试</code>&nbsp;&nbsp; <code>临时登录环境</code>
+</p>
+
+## 🧩 核心能力
+
+| 核心体验 | StarBrowser 如何处理 |
+|---|---|
+| **独立浏览器身份** | 每个会话拥有独立的 Cookie、Local Storage、IndexedDB、缓存和登录凭证；账号之间不会串号。 |
+| **会话内自然共享** | 同一会话的多个标签页共享同一个 Chromium 存储分区，登录一次后同域网页可以正常共用状态。 |
+| **现代多标签浏览** | 标签页支持新建、切换、关闭和实时拖动排序，网站图标、加载状态与顺序都会保存。 |
+| **收藏与长期备注** | 收藏夹在所有会话间共享；每个会话还有可拖动的备注标签，适合记录大量文字。 |
+| **便携且可迁移** | 软件、Chromium 内核和 `data` 数据目录放在同一文件夹；会话还可加密导入导出。 |
+| **资源按设备调节** | 五档性能策略决定后台保留范围和视觉效果，让低配电脑优先流畅、高配电脑优先即时切换。 |
+
+## 🖼️ 界面与使用方式
+
+<p align="center">
+  <img src="docs/screenshots/01-isolated-sessions.png" alt="多个隔离会话与 GitHub Trending 浏览页面" width="100%" />
+</p>
+
+<p align="center"><b>一个窗口管理多个隔离身份：左侧选择会话，右侧使用完整 Chromium 网页。</b></p>
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/01-main.png" alt="StarBrowser 主界面" /></td>
-    <td width="50%"><img src="docs/screenshots/02-settings.png" alt="五档性能与设置中心" /></td>
+    <td width="50%"><img src="docs/screenshots/02-session-switch.png" alt="切换到另一个独立会话" /></td>
+    <td width="50%"><img src="docs/screenshots/03-favorites.png" alt="所有会话共享的收藏夹" /></td>
   </tr>
   <tr>
-    <td align="center"><b>双栏浏览与隔离会话</b></td>
-    <td align="center"><b>五档性能与用户偏好</b></td>
+    <td align="center"><b>切换会话就是切换完整浏览器身份</b></td>
+    <td align="center"><b>全局收藏夹快速打开常用网页</b></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/04-memo.png" alt="会话专属的大容量备注标签" /></td>
+    <td width="50%"><img src="docs/screenshots/05-session-settings.png" alt="会话可用时间与自动回收设置" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>备注与网页标签一起保存和排序</b></td>
+    <td align="center"><b>按用途记录时间并管理会话生命周期</b></td>
   </tr>
 </table>
 
-<p align="center"><img src="docs/screenshots/03-update.png" alt="StarBrowser 自动更新浮窗" width="820" /></p>
+<p align="center">
+  <img src="docs/screenshots/06-performance.png" alt="适配不同硬件的五档性能设置" width="820" />
+</p>
 
-## 🌟 它能做什么
-
-| | 功能 | 使用体验 |
-|---|---|---|
-| 🧩 | **真正的会话隔离** | 每个会话拥有独立 Cookie、Local Storage、IndexedDB、缓存和登录状态；同一会话的多个标签页自然共享登录。 |
-| 🧭 | **完整 Chromium 内核** | 浏览器核心随软件一起提供，不依赖电脑是否安装 Chrome 或 WebView2。 |
-| 🗂️ | **现代标签页** | 新建、切换、关闭和拖动排序；网站图标与加载状态一目了然，标签顺序自动保存。 |
-| 📝 | **大容量备注标签** | 备注像网页一样放在顶部标签栏，可拖动排序；隐藏标签不会删除已保存内容。 |
-| ⭐ | **全局收藏栏** | 所有会话共享，支持自动获取网站图标、顶栏快速打开、编辑与拖动排序。 |
-| ♻️ | **自动回收与恢复** | 可选永不回收、1/7/15/30 天或自定义天数；到期进入回收站，30 天后自动清理。 |
-| ⏰ | **可用时间记录** | 在会话卡片显示“几天后 / 几小时后 / 几分钟后可用”，只记录信息，不限制浏览。 |
-| 📦 | **加密导入导出** | `.sbsession` 会话包保存标签、Cookie 和登录相关存储，不包含缓存、快照与收藏夹。 |
-| ⚡ | **五档性能策略** | 首次启动按电脑配置选择固定档位；超低配尽量节省内存，高配保留更多会话与标签。 |
-| 🔄 | **安全自动更新** | 启动后异步检查，也可在设置中手动检查；先下载校验，再由你选择何时重启更新。 |
-| 🖱️ | **Windows 原生体验** | 自定义圆角标题栏，同时保留拖到屏幕顶部最大化、双击标题栏和任务栏安全边界。 |
-| 📋 | **系统剪贴板与右键菜单** | 网页、地址栏和备注可使用系统复制粘贴，网页区域提供中文右键菜单。 |
+<p align="center"><b>从超低配到超高配，按设备决定后台页面保留范围。</b></p>
 
 ## 🚀 三步开始使用
 

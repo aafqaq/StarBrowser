@@ -1543,34 +1543,83 @@ onMounted(async () => {
       prepareShowcase: async () => {
         if (!state.value) return false
         for (const tabId of [...liveTabIds.value]) removeLiveTab(tabId)
-        const work = createSession('工作空间')
-        work.tabs = [createTab('https://www.bing.com/'), createTab('https://github.com/'), createTab('https://www.wikipedia.org/')]
-        work.tabs[0].title = '搜索 - Microsoft Bing'
-        work.tabs[1].title = 'GitHub'
-        work.tabs[2].title = 'Wikipedia'
+        const work = createSession('开发工作')
+        work.tabs = [createTab('https://github.com/trending'), createTab('https://github.com/aafqaq/StarBrowser'), createTab('https://developer.mozilla.org/zh-CN/')]
+        work.tabs[0].title = 'GitHub Trending'
+        work.tabs[1].title = 'StarBrowser'
+        work.tabs[2].title = 'MDN Web Docs'
+        work.tabs.forEach((tab) => { tab.favicon = 'https://github.githubassets.com/favicons/favicon.svg' })
         work.activeTabId = work.tabs[0].id
+        work.memo = '本周工作记录\n\n• 检查多账号登录状态与会话隔离\n• 整理常用项目、文档和搜索入口\n• 发布前完成测试与数据备份\n\n这里可以长期记录大量备注，备注标签也能和网页标签一起拖动排序。'
+        work.memoTabVisible = true
+        work.memoTabIndex = 1
         work.recycleAfterDays = 30
         work.recycleDaysRemaining = 26
-        const store = createSession('电商账号')
-        store.recycleAfterDays = 15
-        store.recycleDaysRemaining = 12
-        const social = createSession('社交媒体')
-        social.availableAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
-        social.recycleAfterDays = 30
-        social.recycleDaysRemaining = 29
+        const personal = createSession('个人生活')
+        personal.tabs = [createTab('https://www.bing.com/maps?cp=31.2304~121.4737&lvl=11&style=r'), createTab('https://www.bing.com/images/trending')]
+        personal.tabs[0].title = 'Bing 地图'
+        personal.tabs[1].title = '热门图片'
+        personal.tabs.forEach((tab) => { tab.favicon = 'https://www.bing.com/sa/simg/favicon-trans-bg-blue-mg.ico' })
+        personal.activeTabId = personal.tabs[0].id
+        personal.recycleAfterDays = 15
+        personal.recycleDaysRemaining = 12
+        const store = createSession('店铺运营')
+        store.availableAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
+        store.recycleAfterDays = 30
+        store.recycleDaysRemaining = 29
         const temporary = createSession('临时测试')
         temporary.recycleAfterDays = 7
         temporary.recycleDaysRemaining = 5
-        state.value.sessions = [work, store, social, temporary]
+        state.value.sessions = [work, personal, store, temporary]
         state.value.activeSessionId = work.id
         state.value.favorites = [
-          { id: uid(), title: 'GitHub', url: 'https://github.com/', favicon: '', folderId: '', createdAt: new Date().toISOString() },
-          { id: uid(), title: '产品文档', url: 'https://www.wikipedia.org/', favicon: '', folderId: '', createdAt: new Date().toISOString() },
-          { id: uid(), title: '常用搜索', url: 'https://www.bing.com/', favicon: '', folderId: '', createdAt: new Date().toISOString() },
+          { id: uid(), title: '热门项目', url: 'https://github.com/trending', favicon: 'https://github.githubassets.com/favicons/favicon.svg', folderId: '', createdAt: new Date().toISOString() },
+          { id: uid(), title: 'StarBrowser', url: 'https://github.com/aafqaq/StarBrowser', favicon: 'https://github.githubassets.com/favicons/favicon.svg', folderId: '', createdAt: new Date().toISOString() },
+          { id: uid(), title: 'Bing 地图', url: 'https://www.bing.com/maps', favicon: 'https://www.bing.com/sa/simg/favicon-trans-bg-blue-mg.ico', folderId: '', createdAt: new Date().toISOString() },
+          { id: uid(), title: 'MDN 文档', url: 'https://developer.mozilla.org/zh-CN/', favicon: 'https://developer.mozilla.org/favicon-48x48.cbbd161b.png', folderId: '', createdAt: new Date().toISOString() },
         ]
         await nextTick()
         await activateSession(work)
         return true
+      },
+      showShowcaseSession: async (sessionIndex, tabIndex) => {
+        if (!state.value) return false
+        modalKind.value = ''
+        const session = state.value.sessions[sessionIndex]
+        const tab = session?.tabs[tabIndex]
+        if (!session || !tab) return false
+        await activateSession(session)
+        await activateTab(tab)
+        await nextTick()
+        return activeSession.value?.id === session.id && activeTab.value?.id === tab.id
+      },
+      showFavoritesShowcase: async () => {
+        await openFavorites()
+        await nextTick()
+        const card = document.querySelector<HTMLElement>('[data-testid="favorites-modal"]')
+        const rect = card?.getBoundingClientRect()
+        return Boolean(card && rect && rect.width > 500 && rect.height > 300 && card.textContent?.includes('收藏夹'))
+      },
+      showMemoShowcase: async () => {
+        modalKind.value = ''
+        const session = state.value?.sessions[0]
+        if (!session) return false
+        await showMemo(session)
+        await nextTick()
+        const editor = document.querySelector<HTMLElement>('.memo-editor')
+        return Boolean(session.memoActive && editor && editor.getBoundingClientRect().height > 300)
+      },
+      showSessionEditorShowcase: async () => {
+        modalKind.value = ''
+        const session = state.value?.sessions[0]
+        if (!session) return false
+        await activateSession(session)
+        const tab = session.tabs.find((item) => item.id === session.activeTabId) || session.tabs[0]
+        if (tab) await activateTab(tab)
+        await editSession(session)
+        await nextTick()
+        const card = document.querySelector<HTMLElement>('[data-testid="session-modal"]')
+        return Boolean(card && card.textContent?.includes('自动移入回收站'))
       },
       showUpdateShowcase: async () => {
         modalKind.value = ''
