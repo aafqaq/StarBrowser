@@ -402,7 +402,9 @@ export class PluginService {
     }
     this.schedule(manifest.id, false)
     this.emit()
-    void this.run(manifest.id, { reason })
+    void this.run(manifest.id, { reason }).catch((error) => {
+      console.error(`Plugin ${manifest.id} background refresh failed`, error)
+    })
   }
 
   async importFile(filePath) {

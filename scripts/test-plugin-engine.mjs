@@ -53,6 +53,7 @@ try {
   assert.deepEqual(engine.configs['chatgpt-usage'], { updateMode: 'interval', intervalHours: 12 }, 'uninstall should preserve config by default')
 
   await service.importFile(manifestPath)
+  await service.run('chatgpt-usage', { reason: 'reinstall-test' })
   assert.equal(service.publicState().installed[0].config.intervalHours, 12, 'reinstall should reuse retained config')
   await service.uninstall('chatgpt-usage', true)
   engine = JSON.parse(await fsp.readFile(path.join(temporary, 'plugins', 'engine.json'), 'utf8'))
