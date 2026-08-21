@@ -662,18 +662,42 @@ function assertUpdateStage(versionRoot) {
   if (!resolvedStage.toLowerCase().startsWith(`${resolvedBase.toLowerCase()}${path.sep}`)) throw new Error('更新临时目录越界')
 }
 
+async function updateStageHasLiveWorker(stage) {
+  const pidText = await updateFsp.readFile(path.join(stage, 'worker.pid'), 'utf8').catch(() => '')
+  const pid = Number.parseInt(pidText.trim(), 10)
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false
+  try {
+    // Signal 0 performs a liveness check without terminating the process.
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // An access-denied result still means a process with that PID exists; keep
+    // the stage so a privileged updater is not disrupted by startup cleanup.
+    return error?.code === 'EPERM' || error?.code === 'EACCES'
+  }
+}
+
 async function cleanupStaleUpdateStages() {
   if (postUpdateToken) return
   await updateFsp.mkdir(updatesBaseRoot, { recursive: true })
   const entries = await updateFsp.readdir(updatesBaseRoot, { withFileTypes: true })
+  let liveWorkerFound = false
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const stage = path.join(updatesBaseRoot, entry.name)
     assertUpdateStage(stage)
+    if (await updateStageHasLiveWorker(stage)) {
+      liveWorkerFound = true
+      continue
+    }
     await removeUpdateTree(stage)
   }
-  await updateFsp.rm(updateCleanupFile, { force: true }).catch(() => {})
-  await updateFsp.rm(updateProgressFile, { force: true }).catch(() => {})
+  // Do not erase the shared progress/cleanup markers while a detached worker
+  // is still applying an update after the old process has exited.
+  if (!liveWorkerFound) {
+    await updateFsp.rm(updateCleanupFile, { force: true }).catch(() => {})
+    await updateFsp.rm(updateProgressFile, { force: true }).catch(() => {})
+  }
 }
 
 async function loadPreviousUpdateFailure() {
@@ -685,14 +709,35 @@ async function loadPreviousUpdateFailure() {
   }
 }
 
-async function waitForUpdateHandoff(handoffPath, updater, timeoutMs = 6_000) {
+async function waitForUpdateHandoff(handoffPath, updater, timeoutMs = 8_000, { detachedBootstrap = false, failurePath = '' } = {}) {
   const startedAt = Date.now()
+  let exitedAt = 0
+  let exitCode = null
   while (Date.now() - startedAt < timeoutMs) {
     if (updateFs.existsSync(handoffPath)) return true
-    if (updater.exitCode !== null) throw new Error(`更新器提前退出（${updater.exitCode}）`)
+    if (failurePath) {
+      const failure = await updateFsp.readFile(failurePath, 'utf8').catch(() => '')
+      if (failure.trim()) throw new Error(failure.trim())
+    }
+    if (updater && updater.exitCode !== null) {
+      // A worker can exit immediately after writing the marker while the
+      // filesystem notification is still settling.  Check the marker first
+      // and allow a short grace period before declaring a failed handoff.
+      if (!exitedAt) {
+        exitedAt = Date.now()
+        exitCode = updater.exitCode
+      }
+      if (!detachedBootstrap && (exitCode !== 0 || Date.now() - exitedAt >= 2_000)) {
+        const detail = failurePath ? await updateFsp.readFile(failurePath, 'utf8').catch(() => '') : ''
+        throw new Error(detail.trim() || `更新器提前退出（${exitCode}）`)
+      }
+    }
     await delay(100)
   }
-  throw new Error('更新器接管超时，当前软件保持运行，请重试')
+  const detail = failurePath ? await updateFsp.readFile(failurePath, 'utf8').catch(() => '') : ''
+  if (detail.trim()) throw new Error(detail.trim())
+  const suffix = updater && updater.exitCode === null ? '' : `（启动进程退出码 ${updater?.exitCode ?? '未知'}）`
+  throw new Error(`更新器未确认接管${suffix}，当前软件保持运行，请重试`)
 }
 
 async function downloadUpdate() {
@@ -824,25 +869,84 @@ async function installDownloadedUpdate() {
   })
   await updateFsp.rm(handoffPath, { force: true }).catch(() => {})
   await updateFsp.rm(updateProgressFile, { force: true }).catch(() => {})
+  await updateFsp.rm(updateFailureFile, { force: true }).catch(() => {})
   await updateFsp.writeFile(workerScriptPath, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(script, 'utf16le')]))
   await updateFsp.writeFile(uiScriptPath, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(uiScript, 'utf16le')]))
-  const launchScriptPath = updateIntegrationMode ? workerScriptPath : uiScriptPath
-  const updater = spawn('powershell.exe', [
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-    ...(updateIntegrationMode ? [] : ['-STA']),
-    '-WindowStyle', 'Hidden', '-File', launchScriptPath,
-  ], { detached: true, windowsHide: true, stdio: 'ignore', cwd: os.tmpdir() })
+  // Start the actual worker independently of the optional WPF progress
+  // window.  The old flow launched the UI first and relied on that script to
+  // create the handoff marker; on some Windows machines PowerShell/WPF exited
+  // with code 0 before the marker was written, leaving the app reporting
+  // "更新器提前退出（0）" and never replacing itself.  The worker is the
+  // source of truth now; the UI is only a monitor opened after handoff.
+  const powerShellPath = process.env.SystemRoot
+    ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    : 'powershell.exe'
+  const wscriptPath = process.env.SystemRoot
+    ? path.join(process.env.SystemRoot, 'System32', 'wscript.exe')
+    : 'wscript.exe'
+  const psLiteralForCommand = (value) => String(value).replaceAll("'", "''")
+  const buildHiddenLauncherVbs = ({ scriptPath, environment = {}, sta = false }) => {
+    // wscript.exe is a GUI-subsystem host, so this bootstrap never flashes a
+    // console window. It starts PowerShell as a separate process (outside the
+    // Electron job boundary) and passes the actual script through an encoded
+    // command, which also handles portable paths containing spaces/quotes.
+    const assignments = Object.entries(environment)
+      .map(([key, value]) => `$env:${key}='${psLiteralForCommand(value)}'`)
+      .join('; ')
+    const command = `${assignments ? `${assignments}; ` : ''}& '${psLiteralForCommand(scriptPath)}'`
+    const encoded = Buffer.from(command, 'utf16le').toString('base64')
+    const args = [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      ...(sta ? ['-STA'] : []), '-WindowStyle', 'Hidden', '-EncodedCommand', encoded,
+    ].join(' ')
+    const safePowerShell = powerShellPath.replaceAll('"', '""')
+    return [
+      'Option Explicit',
+      'Dim shell, command',
+      'Set shell = CreateObject("WScript.Shell")',
+      `command = Chr(34) & "${safePowerShell}" & Chr(34) & " ${args}"`,
+      'shell.Run command, 0, False',
+      // Give the child process time to detach before this tiny GUI bootstrap
+      // exits; otherwise a Windows job can terminate it in the same tick.
+      'WScript.Sleep 500',
+    ].join('\r\n') + '\r\n'
+  }
+  const workerLauncherPath = path.join(downloadedUpdate.versionRoot, 'launch-update-worker.vbs')
+  const monitorLauncherPath = path.join(downloadedUpdate.versionRoot, 'launch-update-monitor.vbs')
+  await updateFsp.writeFile(workerLauncherPath, buildHiddenLauncherVbs({ scriptPath: workerScriptPath }), 'ascii')
+  await updateFsp.writeFile(monitorLauncherPath, buildHiddenLauncherVbs({
+    scriptPath: uiScriptPath,
+    sta: true,
+    environment: { STARBROWSER_UPDATER_MONITOR_ONLY: '1', STARBROWSER_UPDATER_WORKER_PID: '' },
+  }), 'ascii')
+  const spawnDetachedPowerShell = (launcherPath, env = process.env) => spawn(wscriptPath, [
+    '//B', '//NoLogo', launcherPath,
+  ], { detached: true, windowsHide: true, stdio: 'ignore', cwd: os.tmpdir(), env })
+  const worker = spawnDetachedPowerShell(workerLauncherPath)
   await new Promise((resolve, reject) => {
-    updater.once('spawn', resolve)
-    updater.once('error', reject)
+    worker.once('spawn', resolve)
+    worker.once('error', reject)
   })
   try {
-    await waitForUpdateHandoff(handoffPath, updater)
+    await waitForUpdateHandoff(handoffPath, worker, 8_000, { detachedBootstrap: true, failurePath: updateFailureFile })
   } catch (error) {
-    try { updater.kill() } catch { /* It may already have exited. */ }
+    try { worker.kill() } catch { /* It may already have exited. */ }
     return setUpdateStatus({ phase: 'error', error: error instanceof Error ? error.message : String(error) })
   }
-  updater.unref()
+  worker.unref()
+
+  if (!updateIntegrationMode) {
+    // Failure to create the optional monitor must not cancel a worker that has
+    // already acknowledged the handoff.  The worker continues headlessly and
+    // writes progress/error files for the next startup if necessary.
+    try {
+      const monitor = spawnDetachedPowerShell(monitorLauncherPath)
+      monitor.once('error', (error) => console.warn('Update monitor failed to start', error))
+      monitor.unref()
+    } catch (error) {
+      console.warn('Update monitor failed to start', error)
+    }
+  }
   quitting = true
   quitPrepared = true
   mainWindow?.hide()

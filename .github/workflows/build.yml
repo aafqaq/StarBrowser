@@ -39,6 +39,9 @@ jobs:
       - name: Test native updater progress window
         run: npm run test:update:ui
 
+      - name: Test detached updater handoff after parent exit
+        run: npm run test:update:handoff
+
       - name: Test declarative plugin engine
         run: npm run test:plugins
 

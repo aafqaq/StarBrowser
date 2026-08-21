@@ -22,9 +22,15 @@ const script = buildApplyUpdatePowerShell({
 })
 assert.ok(script.length > 1000 && script.includes('Assert-SafeRoot'))
 assert.ok(script.includes('handoff-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ready'), 'updater must acknowledge handoff before the app exits')
+assert.ok(script.includes("$workerPidFile = Join-Path $updates 'worker.pid'") && script.includes('Set-Content -LiteralPath $workerPidFile'), 'updater must publish a worker liveness marker')
+assert.ok(script.includes('PathType Container') && script.includes('Get-CanonicalPath'), 'updater must validate canonical staging directories')
+assert.ok(script.includes('exit 1'), 'handled worker failures must not be reported as exit code 0')
 assert.ok(script.includes('A transient antivirus/ASAR lock must'), 'cleanup failure after a healthy launch must not trigger rollback')
 assert.ok(script.includes('$programChanged = $false'), 'rollback must only run after program mutation begins')
 assert.ok(script.includes("Write-UpdateProgress 'success' 100"), 'worker must report completion to the visible updater')
+const validationCall = script.lastIndexOf('\n  Assert-SafeRoot')
+const handoffCall = script.lastIndexOf('\n  Write-UpdateHandoff')
+assert.ok(validationCall >= 0 && handoffCall > validationCall, 'invalid staging paths must not close the running app')
 const uiScript = buildUpdateUiPowerShell({
   workerScript: path.join(updates, 'apply-update-worker.ps1'),
   progressFile: path.join(target, 'data', 'update-progress.json'),

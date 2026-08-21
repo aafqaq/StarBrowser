@@ -1,6 +1,6 @@
 {
   "name": "starbrowser3",
-  "version": "1.8.6",
+  "version": "1.8.7",
   "description": "便携式会话隔离浏览器",
   "type": "module",
   "main": "main/electron.mjs",
@@ -15,6 +15,7 @@
     "dist:dir": "npm run dist",
     "test:update": "node scripts/test-update-core.mjs",
     "test:update:ui": "node scripts/test-update-ui.mjs",
+    "test:update:handoff": "node scripts/test-update-handoff.mjs",
     "test:update:extract": "electron scripts/test-update-extraction.mjs",
     "test:update:integration": "node scripts/test-update-integration.mjs",
     "test:plugins": "node scripts/test-plugin-engine.mjs"

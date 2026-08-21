@@ -121,6 +121,7 @@ $backup = Join-Path $updates 'rollback-program'
 $safety = Join-Path $updates 'safety'
 $health = Join-Path $updates ${psLiteral(`health-${token}.ok`)}
 $handoff = Join-Path $updates ${psLiteral(`handoff-${token}.ready`)}
+$workerPidFile = Join-Path $updates 'worker.pid'
 $failureLog = Join-Path $data 'update-error.log'
 $cleanupLog = Join-Path $data 'update-cleanup-pending.log'
 $progressFile = Join-Path $data 'update-progress.json'
@@ -132,20 +133,76 @@ $programChanged = $false
 
 function Write-UpdateProgress([string]$phase, [int]$percent, [string]$message, [string]$detail = '') {
   try {
+    $progressParent = Split-Path -Parent $progressFile
+    if ($progressParent) { New-Item -ItemType Directory -Path $progressParent -Force | Out-Null }
     [ordered]@{ phase = $phase; percent = $percent; message = $message; detail = $detail; updatedAt = [DateTime]::UtcNow.ToString('o') } |
       ConvertTo-Json -Compress | Set-Content -LiteralPath $progressFile -Encoding UTF8 -Force
   } catch { }
 }
 
+function Write-UpdateHandoff {
+  # The handoff marker is the only signal the main process needs before it
+  # exits.  Create its parent defensively: an interrupted download or an AV
+  # scan can leave the staging directory present without the marker itself.
+  $handoffParent = Split-Path -Parent $handoff
+  if ($handoffParent) { New-Item -ItemType Directory -Path $handoffParent -Force | Out-Null }
+  Set-Content -LiteralPath $workerPidFile -Value ([string]$PID) -Encoding ASCII -Force
+  Set-Content -LiteralPath $handoff -Value ([DateTime]::UtcNow.ToString('o')) -Encoding ASCII -Force
+}
+
+function Get-NormalizedPath([string]$value) {
+  $full = [IO.Path]::GetFullPath($value)
+  while ($full.Length -gt 3 -and ($full.EndsWith('\') -or $full.EndsWith('/'))) {
+    $full = $full.Substring(0, $full.Length - 1)
+  }
+  return $full
+}
+
+function Get-CanonicalPath([string]$value) {
+  $normalized = Get-NormalizedPath $value
+  try {
+    # Resolve-Path follows junctions/symlinks when the stage already exists.
+    # This prevents a crafted or stale stage from escaping the portable data
+    # directory while retaining a lexical fallback for a not-yet-created path.
+    $resolved = (Resolve-Path -LiteralPath $normalized -ErrorAction Stop).ProviderPath
+    return Get-NormalizedPath $resolved
+  } catch {
+    return $normalized
+  }
+}
+
+function Test-PathWithin([string]$parent, [string]$child) {
+  $parentPath = Get-CanonicalPath $parent
+  $childPath = Get-CanonicalPath $child
+  if ([StringComparer]::OrdinalIgnoreCase.Equals($parentPath, $childPath)) { return $true }
+  return $childPath.StartsWith($parentPath + '\', [StringComparison]::OrdinalIgnoreCase)
+}
+
 function Assert-SafeRoot {
-  $targetFull = [IO.Path]::GetFullPath($target).TrimEnd('\')
-  $dataFull = [IO.Path]::GetFullPath($data).TrimEnd('\')
-  $updatesFull = [IO.Path]::GetFullPath($updates).TrimEnd('\')
-  $payloadFull = [IO.Path]::GetFullPath($payload).TrimEnd('\')
-  if ($dataFull -ne (Join-Path $targetFull 'data')) { throw 'data 路径校验失败' }
-  if (-not $updatesFull.StartsWith($dataFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '更新目录越界' }
-  if (-not $payloadFull.StartsWith($updatesFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '更新负载目录越界' }
-  if (-not (Test-Path -LiteralPath (Join-Path $payloadFull 'StarBrowser.exe'))) { throw '更新负载缺少主程序' }
+  $targetFull = Get-CanonicalPath $target
+  $dataFull = Get-CanonicalPath $data
+  $updatesFull = Get-CanonicalPath $updates
+  $payloadFull = Get-CanonicalPath $payload
+  $expectedData = Get-CanonicalPath (Join-Path $targetFull 'data')
+  $diagnostic = "target=$targetFull; data=$dataFull; updates=$updatesFull; payload=$payloadFull"
+  foreach ($directory in @(@($targetFull, '程序目录'), @($dataFull, 'data 目录'), @($updatesFull, '更新目录'), @($payloadFull, '更新负载目录'))) {
+    if (-not (Test-Path -LiteralPath $directory[0] -PathType Container)) {
+      throw "$($directory[1])不存在或不是目录（$diagnostic）"
+    }
+  }
+  if (-not [StringComparer]::OrdinalIgnoreCase.Equals($dataFull, $expectedData)) {
+    throw "data 路径校验失败（$diagnostic）"
+  }
+  if (-not (Test-PathWithin $dataFull $updatesFull)) {
+    throw "更新目录越界（$diagnostic）"
+  }
+  if (-not (Test-PathWithin $updatesFull $payloadFull)) {
+    throw "更新负载目录越界（$diagnostic）"
+  }
+  $payloadExe = Join-Path $payloadFull 'StarBrowser.exe'
+  if (-not (Test-Path -LiteralPath $payloadExe -PathType Leaf)) {
+    throw "更新负载缺少主程序（$diagnostic）"
+  }
 }
 
 function Remove-Owned([string[]]$names) {
@@ -178,9 +235,13 @@ function Restore-Program {
 }
 
 try {
+  # Validate the stage before asking the main process to exit.  A malformed or
+  # out-of-root stage must leave the current app running; the failure log is
+  # enough for the handoff waiter to show the diagnostic without closing the
+  # only healthy instance.
   Assert-SafeRoot
+  Write-UpdateHandoff
   Write-UpdateProgress 'handoff' 5 '更新程序已接管，正在关闭 StarBrowser…'
-  Set-Content -LiteralPath $handoff -Value ([DateTime]::UtcNow.ToString('o')) -Encoding ASCII -Force
   Write-UpdateProgress 'waiting' 12 '正在等待主程序安全退出…'
   for ($attempt = 0; $attempt -lt 150; $attempt++) {
     if (-not (Get-Process -Id $mainPid -ErrorAction SilentlyContinue)) { break }
@@ -247,6 +308,9 @@ try {
     Add-Content -LiteralPath $failureLog -Value ([Environment]::NewLine + "回滚失败：$($_.Exception.Message)") -Encoding UTF8
     Write-UpdateProgress 'error' 100 '更新失败，请重新打开 StarBrowser 后重试。' $_.Exception.Message
   }
+  # PowerShell otherwise returns exit code 0 after a handled top-level catch,
+  # which made the Electron side report the misleading “提前退出（0）”.
+  exit 1
 }
 `
   return script.trimStart()
@@ -264,6 +328,7 @@ $worker = ${psLiteral(worker)}
 $progressFile = ${psLiteral(progress)}
 $failureFile = ${psLiteral(failure)}
 $handoffFile = ${psLiteral(handoff)}
+$workerPidFile = Join-Path (Split-Path -Parent $handoffFile) 'worker.pid'
 $version = ${psLiteral(displayVersion)}
 
 $script:workerProcess = $null
@@ -278,11 +343,24 @@ function Start-UpdateWorker {
   Set-Content -LiteralPath $handoffFile -Value ([DateTime]::UtcNow.ToString('o')) -Encoding ASCII -Force
 }
 
-# The worker and handoff start before WPF/XAML initialization. If a machine
-# cannot initialize the optional progress window, the actual update still runs.
-try { Start-UpdateWorker } catch {
-  Set-Content -LiteralPath $failureFile -Value ("无法启动更新工作进程：" + $_.Exception.Message) -Encoding UTF8 -Force
-  exit 1
+# In normal operation Electron starts the worker before opening this monitor.
+# Keep the old self-starting behaviour for standalone/UI tests and for users
+# launching the script directly.  The monitor-only path is important because
+# WPF/XAML initialization must never decide whether the actual update starts.
+$monitorOnly = $env:STARBROWSER_UPDATER_MONITOR_ONLY -eq '1'
+if (-not $monitorOnly) {
+  try { Start-UpdateWorker } catch {
+    Set-Content -LiteralPath $failureFile -Value ("无法启动更新工作进程：" + $_.Exception.Message) -Encoding UTF8 -Force
+    exit 1
+  }
+}
+
+$monitorWorkerPid = 0
+if ($env:STARBROWSER_UPDATER_WORKER_PID) {
+  [int]::TryParse($env:STARBROWSER_UPDATER_WORKER_PID, [ref]$monitorWorkerPid) | Out-Null
+}
+if ($monitorWorkerPid -le 0 -and (Test-Path -LiteralPath $workerPidFile)) {
+  try { [int]::TryParse((Get-Content -LiteralPath $workerPidFile -Raw -Encoding ASCII).Trim(), [ref]$monitorWorkerPid) | Out-Null } catch { }
 }
 
 Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
@@ -334,6 +412,19 @@ $percentText = $window.FindName('PercentText')
 $closeButton = $window.FindName('CloseButton')
 $script:working = $true
 $script:successAt = $null
+$script:monitorStartedAt = [DateTime]::UtcNow
+
+function Show-UpdateFailure([string]$message = '') {
+  $script:working = $false
+  $closeButton.IsEnabled = $true
+  $closeButton.Content = '关闭'
+  $statusText.Text = '更新程序意外退出，当前软件文件未被继续修改。'
+  $detail = $message
+  if ([string]::IsNullOrWhiteSpace($detail) -and (Test-Path -LiteralPath $failureFile)) {
+    try { $detail = Get-Content -LiteralPath $failureFile -Raw -Encoding UTF8 } catch { }
+  }
+  $detailText.Text = [string]$detail
+}
 
 $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(120)
@@ -358,11 +449,24 @@ $timer.Add_Tick({
         $closeButton.Content = '关闭'
       }
     } catch { }
-  } elseif ($script:workerProcess -and $script:workerProcess.HasExited) {
-    $script:working = $false
-    $closeButton.IsEnabled = $true
-    $statusText.Text = '更新程序意外退出，当前软件文件未被继续修改。'
-    if (Test-Path -LiteralPath $failureFile) { $detailText.Text = Get-Content -LiteralPath $failureFile -Raw -Encoding UTF8 }
+  } else {
+    $workerExited = $false
+    if ($script:workerProcess) {
+      try {
+        $script:workerProcess.Refresh()
+        $workerExited = $script:workerProcess.HasExited
+      } catch { $workerExited = $true }
+    } elseif ($monitorOnly -and $monitorWorkerPid -gt 0) {
+      try {
+        $workerState = Get-Process -Id $monitorWorkerPid -ErrorAction Stop
+        $workerExited = $workerState.HasExited
+      } catch { $workerExited = $false }
+    }
+    if (Test-Path -LiteralPath $failureFile) {
+      Show-UpdateFailure
+    } elseif ($workerExited -and ([DateTime]::UtcNow - $script:monitorStartedAt).TotalSeconds -ge 1) {
+      Show-UpdateFailure
+    }
   }
 })
 $closeButton.Add_Click({ $window.Close() })

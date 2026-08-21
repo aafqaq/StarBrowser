@@ -36,6 +36,7 @@ jobs:
           npm run test:update
           npm run test:update:extract
           npm run test:update:ui
+          npm run test:update:handoff
           npm run test:plugins
           npm run typecheck
 
