@@ -9,6 +9,7 @@ declare global {
     getWebContentsId(): number
     getURL(): string
     getTitle(): string
+    executeJavaScript(code: string): Promise<unknown>
     loadURL(url: string): Promise<void>
     reload(): void
     stop(): void
@@ -46,9 +47,9 @@ declare global {
       showPluginsShowcase(): Promise<boolean>
       activateTabAt(index: number): Promise<string>
       activationStabilityCheck(): Promise<{ guestStable: boolean; navigationStable: boolean; beforeGuestId: number; afterGuestId: number; beforeNavigations: number; afterNavigations: number }>
-      multiTabRestoreStabilityCheck(): Promise<{ primaryGuestStable: boolean; primaryNavigationStable: boolean; secondaryGuestReady: boolean; preloadRemoved: boolean }>
+      multiTabRestoreStabilityCheck(): Promise<{ primaryGuestStable: boolean; primaryNavigationStable: boolean; secondaryGuestReady: boolean; sameSessionRetained: boolean; sameSessionNavigationStable: boolean; primaryMarkerRetained: boolean; secondaryMarkerRetained: boolean; primaryInputRetained: boolean; secondaryInputRetained: boolean; domOrderStable: boolean; preloadRemoved: boolean }>
       hoverPreloadCheck(): Promise<{ liveStable: boolean; domStable: boolean; apiRemoved: boolean }>
-      performancePolicyCheck(): Promise<{ lowLiveTabs: number; lowLiveSessions: number; lowDomGuests: number; mediumBudget: number; highBudget: number; ultraHighBudget: number; fixedUnderCritical: boolean; criticalRuntimeBudget: number; constrainedRuntimeBudget: number; memoryCappedBudget: number; recommendedTier: string; lowVisualMode: boolean; restoredMode: boolean }>
+      performancePolicyCheck(): Promise<{ lowLiveTabs: number; lowLiveSessions: number; lowDomGuests: number; retentionStable: boolean; mediumBudget: number; highBudget: number; ultraHighBudget: number; fixedUnderCritical: boolean; criticalRuntimeBudget: number; constrainedRuntimeBudget: number; memoryCappedBudget: number; recommendedTier: string; lowVisualMode: boolean; restoredMode: boolean }>
     }
   }
 

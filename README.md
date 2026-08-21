@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/release.svg" alt="最新版本 v1.8.2" /></a>
+  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/release.svg" alt="最新版本 v1.8.6" /></a>
   <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/download.svg" alt="下载 Windows x64" /></a>
   <a href="https://github.com/aafqaq/StarBrowser/actions/workflows/build.yml"><img src="docs/badges/build.svg" alt="Windows 构建通过" /></a>
   <a href="https://github.com/aafqaq/StarBrowser/stargazers"><img src="https://img.shields.io/github/stars/aafqaq/StarBrowser?style=for-the-badge&color=ffb23f&label=Stars" alt="GitHub Stars" /></a>
@@ -50,7 +50,7 @@ StarBrowser 面向需要同时管理多个网页登录身份的人：一个窗�
 | **现代多标签浏览** | 标签页支持新建、切换、关闭和实时拖动排序，网站图标、加载状态与顺序都会保存。 |
 | **收藏与长期备注** | 收藏夹在所有会话间共享；每个会话还有可拖动的备注标签，适合记录大量文字。 |
 | **便携且可迁移** | 软件、Chromium 内核和 `data` 数据目录放在同一文件夹；会话还可加密导入导出。 |
-| **资源按设备调节** | 五档性能策略决定后台保留范围和视觉效果，让低配电脑优先流畅、高配电脑优先即时切换。 |
+| **资源按设备调节** | 五档性能策略调整前后台帧率、后台节流和视觉效果；已打开页面不会被自动销毁或重排，避免输入与播放状态丢失。 |
 | **声明式插件系统** | 插件是受限 JSON 规则，由核心统一提供钩子、网络权限、定时任务、独立配置和会话徽标，不执行第三方脚本。 |
 
 ## 🖼️ 界面与使用方式

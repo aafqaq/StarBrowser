@@ -377,47 +377,29 @@ function runtimePerSessionBudget(policy = currentPerformancePolicy.value) {
 
 function trimLiveTabs() {
   if (!state.value) return
-  const policy = currentPerformancePolicy.value
   const sessionByTab = new Map<string, BrowserSession>()
   const validSessionIds = new Set(state.value.sessions.map((session) => session.id))
   for (const session of state.value.sessions) for (const tab of session.tabs) sessionByTab.set(tab.id, session)
   recentSessionIds.value = recentSessionIds.value.filter((id, index, values) => validSessionIds.has(id) && values.indexOf(id) === index)
   recentTabIds.value = recentTabIds.value.filter((id, index, values) => sessionByTab.has(id) && values.indexOf(id) === index)
   if (activeSession.value) touchRecent(recentSessionIds.value, activeSession.value.id)
-
-  const maxLiveTabs = runtimeLiveBudget(policy)
-  const maxTabsPerSession = runtimePerSessionBudget(policy)
-  const allowedSessions = new Set(recentSessionIds.value.slice(0, runtimeSessionBudget(policy)))
-  // Never recycle a WebView belonging to the currently open session. Recreating
-  // a guest after a retention pass navigates it from `initialUrl` again, which
-  // looks like an unsolicited refresh and can also interrupt form/video state.
-  // Performance tiers still reduce memory by trimming inactive sessions and by
-  // throttling every background guest in the main process.
-  const activeSessionId = activeSession.value?.id || ''
-  const liveSet = new Set(liveTabIds.value)
-  const priority = [activeTab.value?.id || '', ...recentTabIds.value, ...liveTabIds.value].filter(Boolean)
-  const keep: string[] = []
-  const perSession = new Map<string, number>()
-  for (const tabId of priority) {
-    if (keep.includes(tabId) || !liveSet.has(tabId)) continue
-    const owner = sessionByTab.get(tabId)
-    if (!owner || (owner.id !== activeSessionId && !allowedSessions.has(owner.id))) continue
-    const count = perSession.get(owner.id) || 0
-    const isCurrentSession = owner.id === activeSessionId
-    if (!isCurrentSession && (count >= maxTabsPerSession || keep.length >= maxLiveTabs)) continue
-    keep.push(tabId)
-    perSession.set(owner.id, count + 1)
-  }
-  const removed = liveTabIds.value.filter((tabId) => !keep.includes(tabId))
-  for (const tabId of removed) {
+  // This used to be an automatic WebView eviction pass. Removing or reordering
+  // a native <webview> can detach its Chromium guest and cause Vue/Electron to
+  // navigate it again from `initialUrl`, losing unsaved form input. Memory
+  // pressure is not a safe reason to destroy a user's page, so retention is
+  // now bookkeeping only: remove ids whose tabs no longer exist. Explicit tab
+  // close, session rebuild and recycle still call removeLiveTab and release
+  // those guests deterministically.
+  const validLiveIds = new Set(sessionByTab.keys())
+  const staleIds = liveTabIds.value.filter((tabId) => !validLiveIds.has(tabId))
+  if (!staleIds.length) return
+  const staleSet = new Set(staleIds)
+  liveTabIds.value = liveTabIds.value.filter((tabId) => !staleSet.has(tabId))
+  readyTabIds.value = readyTabIds.value.filter((tabId) => !staleSet.has(tabId))
+  for (const tabId of staleIds) {
     liveInitialUrls.delete(tabId)
     mainFrameNavigationCounts.delete(tabId)
   }
-  if (removed.length) {
-    const removedSet = new Set(removed)
-    readyTabIds.value = readyTabIds.value.filter((tabId) => !removedSet.has(tabId))
-  }
-  liveTabIds.value = keep
 }
 
 function scheduleRetentionTrim(delay = currentPerformancePolicy.value.releaseDelayMs) {
@@ -816,16 +798,45 @@ function normalizeUrl(input: string) {
 function navigate() {
   const url = normalizeUrl(address.value)
   address.value = url
-  if (activeTab.value) {
-    activeTab.value.url = url
-    persist()
-    void webviewFor(activeTab.value.id)?.loadURL(url)
+  const tab = activeTab.value
+  if (!tab) return
+  tab.url = url
+  persist()
+  const view = webviewFor(tab.id)
+  const isLiveView = Boolean(view && liveTabIds.value.includes(tab.id))
+  if (!view) {
+    // A brand-new guest receives the URL through its initial src. Calling
+    // loadURL again here would create the very duplicate navigation this
+    // recovery path is intended to avoid.
+    ensureLiveTab(tab, activeSession.value)
+    void nextTick(() => webviewFor(tab.id)?.focus())
+    return
   }
+  if (!isLiveView) {
+    // A renderer process may have exited just before the user submits the
+    // address. Recreate the guest explicitly, then apply the user's URL once;
+    // this is the only non-button path that is allowed to navigate a missing
+    // WebView, so an unsolicited process event can never cause a reload loop.
+    ensureLiveTab(tab, activeSession.value)
+    void nextTick(() => {
+      const restored = webviewFor(tab.id)
+      if (restored) void restored.loadURL(url)
+      restored?.focus()
+    })
+    return
+  }
+  void view?.loadURL(url)
 }
 
 function browserAction(action: 'back' | 'forward' | 'reload' | 'stop') {
   const view = activeTab.value ? webviewFor(activeTab.value.id) : null
-  if (!view) return
+  if (!view) {
+    if (action === 'reload' && activeTab.value) {
+      ensureLiveTab(activeTab.value, activeSession.value)
+      void nextTick(() => webviewFor(activeTab.value?.id || '')?.focus())
+    }
+    return
+  }
   if (action === 'back' && view.canGoBack()) view.goBack()
   if (action === 'forward' && view.canGoForward()) view.goForward()
   if (action === 'reload') view.reload()
@@ -1546,6 +1557,10 @@ async function runMaintenance() {
 function tabForWebviewEvent(event: Event) {
   const view = event.currentTarget as StarBrowserWebviewElement
   const tabId = view.dataset.tabId || ''
+  // A WebView can emit a late load event while Vue is detaching it. Never let
+  // that stale guest update the state of a newer WebView with the same tab id.
+  const currentView = tabId ? webviewFor(tabId) : null
+  if (!currentView || currentView !== view) return null
   for (const session of state.value?.sessions || []) {
     const tab = session.tabs.find((item) => item.id === tabId)
     if (tab) return { tab, view }
@@ -1633,17 +1648,22 @@ function webviewFailed(event: Event) {
   }
 }
 
-async function webviewGone(event: Event) {
+function webviewGone(event: Event) {
   const target = tabForWebviewEvent(event)
   if (!target) return
-  const owner = state.value?.sessions.find((session) => session.tabs.some((tab) => tab.id === target.tab.id)) || null
-  const shouldRestore = target.tab.id === activeTab.value?.id && owner?.id === activeSession.value?.id
+  // Removing a WebView for retention/reordering also destroys its guest and
+  // may emit render-process-gone. It is an intentional detach, not a crash;
+  // never recreate it here (recreation is the unsolicited refresh bug).
+  if (!liveTabIds.value.includes(target.tab.id)) return
   removeLiveTab(target.tab.id)
-  Object.assign(target.tab, { loading: false, title: '页面进程已恢复，正在重新载入' })
-  if (shouldRestore && owner) {
-    await nextTick()
-    ensureLiveTab(target.tab, owner)
-  }
+  readyTabIds.value = readyTabIds.value.filter((id) => id !== target.tab.id)
+  const detail = event as Event & { reason?: string; exitCode?: number }
+  const reason = detail.reason ? `（${detail.reason}）` : ''
+  Object.assign(target.tab, { loading: false, title: `页面进程已退出${reason}，点击标签重新载入` })
+  // Deliberately do not auto-create a new guest. If this was a genuine crash,
+  // the user can explicitly activate/reload the tab; that action is the only
+  // path allowed to navigate after a process exit and prevents data loss in
+  // unsaved form fields.
 }
 
 onMounted(async () => {
@@ -1951,7 +1971,7 @@ onMounted(async () => {
       },
       multiTabRestoreStabilityCheck: async () => {
         const session = activeSession.value
-        if (!session || session.tabs.length < 2) return { primaryGuestStable: false, primaryNavigationStable: false, secondaryGuestReady: false, sameSessionRetained: false, sameSessionNavigationStable: false, preloadRemoved: false }
+        if (!session || session.tabs.length < 2) return { primaryGuestStable: false, primaryNavigationStable: false, secondaryGuestReady: false, sameSessionRetained: false, sameSessionNavigationStable: false, primaryMarkerRetained: false, secondaryMarkerRetained: false, primaryInputRetained: false, secondaryInputRetained: false, domOrderStable: false, preloadRemoved: false }
         const primary = session.tabs[0]
         const secondary = session.tabs[1]
         const originalTier = state.value?.settings.performanceTier
@@ -1959,10 +1979,37 @@ onMounted(async () => {
         await activateTab(primary)
         await nextTick()
         const primaryGuestBefore = await waitForGuestId(primary.id)
+        const primaryView = webviewFor(primary.id)
+        const primaryInputBefore = await primaryView?.executeJavaScript(`(() => {
+          let input = document.querySelector('[data-starbrowser-retention-input]')
+          if (!input) {
+            input = document.createElement('textarea')
+            input.setAttribute('data-starbrowser-retention-input', 'true')
+            input.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0'
+            document.body.appendChild(input)
+          }
+          input.value = 'typed-primary'
+          window.__starbrowserRetentionMarker = 'primary'
+          return input.value
+        })()`).catch(() => '')
         await new Promise((resolve) => window.setTimeout(resolve, 350))
         const primaryNavigationsBefore = mainFrameNavigationCounts.get(primary.id) || 0
+        const domOrderBefore = [...document.querySelectorAll<HTMLElement>('webview.browser-webview')].map((view) => view.dataset.tabId || '')
         await activateTab(secondary)
         const secondaryGuest = await waitForGuestId(secondary.id)
+        const secondaryView = webviewFor(secondary.id)
+        const secondaryInputBefore = await secondaryView?.executeJavaScript(`(() => {
+          let input = document.querySelector('[data-starbrowser-retention-input]')
+          if (!input) {
+            input = document.createElement('textarea')
+            input.setAttribute('data-starbrowser-retention-input', 'true')
+            input.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0'
+            document.body.appendChild(input)
+          }
+          input.value = 'typed-secondary'
+          window.__starbrowserRetentionMarker = 'secondary'
+          return input.value
+        })()`).catch(() => '')
         await new Promise((resolve) => window.setTimeout(resolve, 900))
         if (state.value) state.value.settings.performanceTier = 'ultra-low'
         memoryStatus.value = { ...originalMemoryStatus, level: 'critical' }
@@ -1972,9 +2019,14 @@ onMounted(async () => {
         const primaryNavigationsAfter = mainFrameNavigationCounts.get(primary.id) || 0
         const secondaryGuestAfter = guestIdFor(secondary.id)
         const secondaryNavigationsBefore = mainFrameNavigationCounts.get(secondary.id) || 0
+        const domOrderAfterTrim = [...document.querySelectorAll<HTMLElement>('webview.browser-webview')].map((view) => view.dataset.tabId || '')
         trimLiveTabs()
         await new Promise((resolve) => window.setTimeout(resolve, 350))
         const secondaryNavigationsAfter = mainFrameNavigationCounts.get(secondary.id) || 0
+        const primaryMarker = await webviewFor(primary.id)?.executeJavaScript('window.__starbrowserRetentionMarker || ""').catch(() => '')
+        const secondaryMarker = await webviewFor(secondary.id)?.executeJavaScript('window.__starbrowserRetentionMarker || ""').catch(() => '')
+        const primaryInputAfter = await webviewFor(primary.id)?.executeJavaScript("document.querySelector('[data-starbrowser-retention-input]')?.value || ''").catch(() => '')
+        const secondaryInputAfter = await webviewFor(secondary.id)?.executeJavaScript("document.querySelector('[data-starbrowser-retention-input]')?.value || ''").catch(() => '')
         if (state.value && originalTier) state.value.settings.performanceTier = originalTier
         memoryStatus.value = originalMemoryStatus
         applyPerformanceEnvironment(false)
@@ -1985,6 +2037,11 @@ onMounted(async () => {
           secondaryGuestReady: secondaryGuest > 0 && secondaryGuestAfter > 0,
           sameSessionRetained: liveTabIds.value.includes(primary.id) && liveTabIds.value.includes(secondary.id),
           sameSessionNavigationStable: secondaryNavigationsBefore === secondaryNavigationsAfter,
+          primaryMarkerRetained: primaryMarker === 'primary',
+          secondaryMarkerRetained: secondaryMarker === 'secondary',
+          primaryInputRetained: primaryInputBefore === 'typed-primary' && primaryInputAfter === 'typed-primary',
+          secondaryInputRetained: secondaryInputBefore === 'typed-secondary' && secondaryInputAfter === 'typed-secondary',
+          domOrderStable: domOrderBefore.length > 0 && JSON.stringify(domOrderBefore) === JSON.stringify(domOrderAfterTrim),
           preloadRemoved: !('preconnect' in api.browser),
         }
       },
@@ -2006,7 +2063,7 @@ onMounted(async () => {
       },
       performancePolicyCheck: async () => {
         const session = activeSession.value
-        if (!state.value || !session) return { lowLiveTabs: 99, lowLiveSessions: 99, lowDomGuests: 99, mediumBudget: 0, highBudget: 0, ultraHighBudget: 0, fixedUnderCritical: false, criticalRuntimeBudget: 99, constrainedRuntimeBudget: 99, memoryCappedBudget: 99, recommendedTier: '', lowVisualMode: false, restoredMode: false }
+        if (!state.value || !session) return { lowLiveTabs: 99, lowLiveSessions: 99, lowDomGuests: 99, retentionStable: false, mediumBudget: 0, highBudget: 0, ultraHighBudget: 0, fixedUnderCritical: false, criticalRuntimeBudget: 99, constrainedRuntimeBudget: 99, memoryCappedBudget: 99, recommendedTier: '', lowVisualMode: false, restoredMode: false }
         const originalTier = state.value.settings.performanceTier
         const originalSource = state.value.settings.performanceSelectionSource
         const originalActiveTabId = session.activeTabId
@@ -2034,6 +2091,10 @@ onMounted(async () => {
         const lowLiveTabs = liveTabIds.value.length
         const lowLiveSessions = new Set(liveTabs.value.map((entry) => entry.session.id)).size
         const lowDomGuests = document.querySelectorAll('webview.browser-webview').length
+        const retainedBefore = liveTabIds.value.join('|')
+        trimLiveTabs()
+        await nextTick()
+        const retentionStable = retainedBefore === liveTabIds.value.join('|') && lowDomGuests === document.querySelectorAll('webview.browser-webview').length
         const lowVisualMode = document.body.classList.contains('performance-low-mode') && document.querySelector('.app-shell')?.classList.contains('performance-low') === true
         for (const tab of created) removeLiveTab(tab.id)
         session.tabs = session.tabs.filter((tab) => !created.some((item) => item.id === tab.id))
@@ -2047,6 +2108,7 @@ onMounted(async () => {
           lowLiveTabs,
           lowLiveSessions,
           lowDomGuests,
+          retentionStable,
           mediumBudget: performancePolicies.balanced.maxLiveTabs,
           highBudget: performancePolicies.high.maxLiveTabs,
           ultraHighBudget: performancePolicies['ultra-high'].maxLiveTabs,
@@ -2374,8 +2436,8 @@ onBeforeUnmount(() => {
             <label>点击最大化按钮时<n-select v-model:value="settingsDraft.maximizeBehavior" placement="bottom-start" to="body" :options="[{ label: '窗口最大化（保留任务栏）', value: 'maximize' }, { label: '全屏显示', value: 'fullscreen' }]" /></label>
             <label>固定性能档位<n-select v-model:value="settingsDraft.performanceTier" data-testid="performance-select" placement="bottom-start" to="body" :options="performanceOptions" /></label>
             <div class="performance-summary" :class="`tier-${draftPerformanceTier}`">
-              <div><span>保留会话</span><strong>{{ draftPerformancePolicy.maxLiveSessions }}</strong></div>
-              <div><span>常驻标签</span><strong>{{ draftPerformancePolicy.maxLiveTabs }}</strong></div>
+              <div><span>建议并发会话</span><strong>{{ draftPerformancePolicy.maxLiveSessions }}</strong></div>
+              <div><span>建议并发标签</span><strong>{{ draftPerformancePolicy.maxLiveTabs }}</strong></div>
               <div><span>前台刷新</span><strong>{{ draftPerformancePolicy.activeFrameRate }} FPS</strong></div>
               <div><span>视觉效果</span><strong>{{ draftPerformancePolicy.effects }}</strong></div>
             </div>
@@ -2384,11 +2446,11 @@ onBeforeUnmount(() => {
               <n-tag size="small" round :type="memoryStatus.level === 'normal' ? 'success' : memoryStatus.level === 'constrained' ? 'warning' : 'error'">{{ memoryStatus.level === 'normal' ? '运行正常' : '建议关注' }}</n-tag>
             </div>
             <p class="form-hint">{{ state.settings.performanceSelectionSource === 'automatic' ? '首次启动已自动评估' : '当前档位由用户手动固定' }}：约 {{ machineProfile.totalMemoryGB }} GB 内存、{{ machineProfile.logicalCpuCount }} 个逻辑处理器、平均 {{ machineProfile.averageCpuMHz }} MHz，当前选择{{ hardwareClassLabels[settingsDraft.performanceTier] }}档。</p>
-            <p class="form-hint">切换前会按鼠标停留意图预热页面，切换完成后延迟 {{ releaseDelayLabel(draftPerformancePolicy.releaseDelayMs) }} 清理超额页面。后续检测到持续性能不足时只会给出推荐，软件不会自行改变当前固定档位。</p>
-            <p class="form-hint">被释放的页面再次切换时会重新载入，但 Cookie、本地存储、IndexedDB 与登录信息仍保存在隔离数据目录，不会因此删除。</p>
+            <p class="form-hint">性能档位只调整前台/后台帧率、后台节流和视觉效果；“建议并发”仅用于评估，不会自动关闭、重排或重载已经打开的页面。后续检测到持续性能不足时只会给出推荐，软件不会自行改变当前固定档位。</p>
+            <p class="form-hint">关闭标签或会话才会释放对应浏览器进程。若页面进程真实崩溃，标签会保留并提示，只有你点击标签或刷新时才显式恢复；Cookie、本地存储、IndexedDB 与登录信息始终保存在隔离数据目录。</p>
             <div class="settings-update-card">
               <span class="settings-update-icon"><n-icon><RocketOutline /></n-icon></span>
-              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.3' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
+              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.6' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
               <n-button size="small" secondary @click="openGithubProject"><template #icon><n-icon><StarOutline /></n-icon></template>GitHub</n-button>
               <n-button size="small" type="primary" :loading="updateInfo.phase === 'checking'" @click="checkForUpdatesManually">检查更新</n-button>
             </div>

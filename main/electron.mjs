@@ -1339,6 +1339,7 @@ async function runSmokeCheck() {
             id: (() => { try { return view.getWebContentsId?.() || 0 } catch { return 0 } })(),
             active: view.classList.contains('active'),
             display: style.display,
+            visibility: style.visibility,
             pointerEvents: style.pointerEvents,
             width: view.getBoundingClientRect().width,
             height: view.getBoundingClientRect().height
@@ -1364,7 +1365,13 @@ async function runSmokeCheck() {
           hits,
           allHitsActiveWebview: hits.length === 25 && hits.every((hit) => hit.tag === 'WEBVIEW' && hit.active),
           onlyOneInputView: styles.filter((style) => style.display !== 'none' && style.pointerEvents !== 'none').length === 1,
-          backgroundViewsOutOfLayout: styles.filter((style) => !style.active).every((style) => style.display === 'none' && style.width === 0 && style.height === 0),
+          // WebViews stay mounted to preserve their Chromium guest and form state.
+          // Inactive guests are therefore kept in layout, but must be fully
+          // non-interactive and visually hidden.  The old display:none/zero-size
+          // assertion was coupled to the buggy teardown strategy and falsely
+          // reported a regression after the stability fix.
+          backgroundViewsNonInteractive: styles.filter((style) => !style.active).every((style) => style.pointerEvents === 'none' && style.visibility === 'hidden'),
+          backgroundViewsOutOfLayout: styles.filter((style) => !style.active).every((style) => style.pointerEvents === 'none' && style.visibility === 'hidden'),
           activeGuestId: (() => { try { return views.find((view) => view.classList.contains('active'))?.getWebContentsId?.() || 0 } catch { return 0 } })()
         }
       }
@@ -1525,17 +1532,17 @@ async function runSmokeCheck() {
       sessionForm.sessionModalVisible && sessionForm.availableFieldRemoved &&
       sessionForm.recycleSelect?.visible && sessionForm.recycleSelect?.insideViewport && sessionForm.recycleSelect?.opensUp &&
       !modal.snapshotPresent && modal.activeWebviewVisible && modal.webviewCount === guestBefore.count &&
-      inputLayer.before.allHitsActiveWebview && inputLayer.before.onlyOneInputView && inputLayer.before.backgroundViewsOutOfLayout &&
-      inputLayer.afterSwitch.allHitsActiveWebview && inputLayer.afterSwitch.onlyOneInputView && inputLayer.afterSwitch.backgroundViewsOutOfLayout && inputLayer.switchedGuest &&
+      inputLayer.before.allHitsActiveWebview && inputLayer.before.onlyOneInputView && inputLayer.before.backgroundViewsNonInteractive &&
+      inputLayer.afterSwitch.allHitsActiveWebview && inputLayer.afterSwitch.onlyOneInputView && inputLayer.afterSwitch.backgroundViewsNonInteractive && inputLayer.switchedGuest &&
       memoAndChrome.roundTrip?.retained && memoAndChrome.roundTrip?.layout?.aligned && memoAndChrome.memoMoved && memoAndChrome.browserChanged && memoAndChrome.browserCanLeadMemo && memoAndChrome.nativeDragRegion &&
       favoritesUi.visible && favoritesUi.contentPane && favoritesUi.singlePane && favoritesUi.noFolderControls && favoritesUi.flatData &&
       pluginUi.visible && pluginUi.tabs && pluginUi.importReady && pluginUi.declarativeSafety && pluginUi.availableFieldRemoved && pluginUi.iconConsistent && JSON.stringify(pluginUi.badgeRules?.types) === JSON.stringify(['success', 'info', 'warning', 'error']) && pluginUi.badgeRules?.freshCycleHidden && pluginUi.badgeRules?.usedCycleVisible &&
       recycleOverlay.visible && recycleOverlay.completeText && recycleOverlay.insideViewport && recycleOverlay.teleported &&
       updateUi.visible && updateUi.insideViewport && updateUi.versionShown && updateUi.actionsShown && updateUi.safetyShown && updateUi.progressReady &&
       activationStability.guestStable && activationStability.navigationStable &&
-      multiTabRestoreStability.primaryGuestStable && multiTabRestoreStability.primaryNavigationStable && multiTabRestoreStability.secondaryGuestReady && multiTabRestoreStability.sameSessionRetained && multiTabRestoreStability.sameSessionNavigationStable && multiTabRestoreStability.preloadRemoved &&
+      multiTabRestoreStability.primaryGuestStable && multiTabRestoreStability.primaryNavigationStable && multiTabRestoreStability.secondaryGuestReady && multiTabRestoreStability.sameSessionRetained && multiTabRestoreStability.sameSessionNavigationStable && multiTabRestoreStability.primaryMarkerRetained && multiTabRestoreStability.secondaryMarkerRetained && multiTabRestoreStability.primaryInputRetained && multiTabRestoreStability.secondaryInputRetained && multiTabRestoreStability.domOrderStable && multiTabRestoreStability.preloadRemoved &&
       hoverPreload.liveStable && hoverPreload.domStable && hoverPreload.apiRemoved &&
-      performancePolicy.lowLiveTabs >= 5 && performancePolicy.lowLiveSessions === 1 && performancePolicy.lowDomGuests >= 5 &&
+      performancePolicy.lowLiveTabs >= 5 && performancePolicy.lowLiveSessions === 1 && performancePolicy.lowDomGuests >= 5 && performancePolicy.retentionStable &&
       performancePolicy.mediumBudget === 6 && performancePolicy.highBudget === 9 && performancePolicy.ultraHighBudget === 12 &&
       performancePolicy.fixedUnderCritical && performancePolicy.criticalRuntimeBudget === 1 && performancePolicy.constrainedRuntimeBudget === 5 && performancePolicy.memoryCappedBudget <= 2 &&
       performancePolicy.recommendedTier === 'balanced' && performancePolicy.lowVisualMode && performancePolicy.restoredMode &&
