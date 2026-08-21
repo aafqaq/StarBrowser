@@ -1,232 +1,147 @@
 <p align="center">
-  <img src="docs/banner.png" alt="StarBrowser — 便携、隔离、现代的 Windows 多会话浏览器" width="100%" />
+  <img src="docs/banner.png" alt="StarBrowser — Windows 会话隔离浏览器，多账号独立登录" width="100%" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/release.svg" alt="最新版本 v1.8.7" /></a>
-  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="docs/badges/download.svg" alt="下载 Windows x64" /></a>
-  <a href="https://github.com/aafqaq/StarBrowser/actions/workflows/build.yml"><img src="docs/badges/build.svg" alt="Windows 构建通过" /></a>
-  <a href="https://github.com/aafqaq/StarBrowser/stargazers"><img src="https://img.shields.io/github/stars/aafqaq/StarBrowser?style=for-the-badge&color=ffb23f&label=Stars" alt="GitHub Stars" /></a>
-  <a href="LICENSE"><img src="docs/badges/license.svg" alt="PolyForm Noncommercial License" /></a>
+  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="https://img.shields.io/github/v/release/aafqaq/StarBrowser?style=flat-square&label=Release&color=6d5dfc" alt="最新版本" /></a>
+  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="https://img.shields.io/badge/Download-Windows_x64-3388ff?style=flat-square&logo=windows11&logoColor=white" alt="下载 Windows x64" /></a>
+  <a href="https://github.com/aafqaq/StarBrowser/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/aafqaq/StarBrowser/build.yml?branch=main&style=flat-square&label=Build" alt="Windows 构建状态" /></a>
+  <a href="https://github.com/aafqaq/StarBrowser/stargazers"><img src="https://img.shields.io/github/stars/aafqaq/StarBrowser?style=flat-square&label=Stars&color=f5a623" alt="GitHub Stars" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Noncommercial-8256e8?style=flat-square" alt="非商业许可" /></a>
 </p>
 
 <p align="center">
-  <b>在同一台电脑上同时登录多个网站账号，登录状态互不串号。</b><br />
-  每个会话都是独立的浏览器身份，同一会话内的标签页则自然共享 Cookie 与本地存储。
+  <b>StarBrowser 是一款面向 Windows 的会话隔离浏览器，也是一款便携式多账号浏览器。</b><br />
+  每个会话独立保存 Cookie、Local Storage、IndexedDB、缓存与登录状态；同一会话内的标签页正常共享网站数据。
 </p>
 
 <p align="center">
-  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><b>⬇️ 下载最新版</b></a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#三步开始使用">🚀 快速开始</a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#数据放在哪里">🛡️ 数据安全</a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#使用许可">📜 使用许可</a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://github.com/aafqaq/StarBrowser/issues">💬 问题反馈</a>
-</p>
-
----
-
-## ✨ 这就是 StarBrowser
-
-StarBrowser 面向需要同时管理多个网页登录身份的人：一个窗口左侧切换会话，右侧直接浏览网页。工作账号、个人账号、店铺账号和临时测试环境各自保存登录状态，不需要反复退出账号、开隐私窗口或准备多个浏览器。
-
-<p align="center">
-  <img src="docs/starbrowser-demo.gif" alt="StarBrowser 会话切换、收藏夹、备注与性能设置演示" width="960" />
+  <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><b>下载最新版</b></a>
+  · <a href="#快速开始">快速开始</a>
+  · <a href="#数据与隐私">数据与隐私</a>
+  · <a href="https://github.com/aafqaq/StarBrowser/issues">问题反馈</a>
 </p>
 
 <p align="center">
-  <code>多账号运营</code>&nbsp;&nbsp; <code>社交媒体矩阵</code>&nbsp;&nbsp; <code>开发与测试</code>&nbsp;&nbsp; <code>临时登录环境</code>
+  <img src="docs/starbrowser-demo.gif" alt="StarBrowser 会话隔离、多账号切换与多标签浏览演示" width="960" />
 </p>
 
-## 🧩 核心能力
+## 为什么使用 StarBrowser
 
-| 核心体验 | StarBrowser 如何处理 |
+需要同时登录多个网站账号时，普通浏览器往往要反复退出账号、切换用户目录或打开隐私窗口。StarBrowser 把一个独立浏览器身份做成一张会话卡片：工作账号、个人账号、店铺账号、社交媒体账号和测试环境可以在一个窗口中快速切换，登录状态互不串号。
+
+| 会话之间 | 会话内部 |
 |---|---|
-| **独立浏览器身份** | 每个会话拥有独立的 Cookie、Local Storage、IndexedDB、缓存和登录凭证；账号之间不会串号。 |
-| **会话内自然共享** | 同一会话的多个标签页共享同一个 Chromium 存储分区，登录一次后同域网页可以正常共用状态。 |
-| **现代多标签浏览** | 标签页支持新建、切换、关闭和实时拖动排序，网站图标、加载状态与顺序都会保存。 |
-| **收藏与长期备注** | 收藏夹在所有会话间共享；每个会话还有可拖动的备注标签，适合记录大量文字。 |
-| **便携且可迁移** | 软件、Chromium 内核和 `data` 数据目录放在同一文件夹；会话还可加密导入导出。 |
-| **资源按设备调节** | 五档性能策略调整前后台帧率、后台节流和视觉效果；已打开页面不会被自动销毁或重排，避免输入与播放状态丢失。 |
-| **声明式插件系统** | 插件是受限 JSON 规则，由核心统一提供钩子、网络权限、定时任务、独立配置和会话徽标，不执行第三方脚本。 |
+| Cookie、站点存储、缓存与登录凭证相互隔离 | 多个标签页共享同一套站点数据，登录一次即可正常使用 |
+| 每个会话保留自己的标签页与备注 | 标签支持新建、切换、关闭和实时拖动排序 |
+| 可单独重建、回收、加密导入或导出 | 收藏夹由所有会话共享 |
 
-## 🖼️ 界面与使用方式
+## 核心功能
+
+- **会话隔离**：每个会话使用独立、持久化的 Chromium 存储分区。
+- **多账号同时登录**：适合店铺运营、社交媒体矩阵、开发测试和临时账号管理。
+- **完整多标签浏览**：网站图标、加载状态、标签顺序和打开页面均会保存。
+- **便携免安装**：程序、Chromium 内核和用户数据位于同一个文件夹。
+- **备注与收藏**：会话专属的大容量备注标签，以及全局共享收藏夹。
+- **数据迁移**：可加密导入、导出单个会话，不包含网页缓存和收藏夹。
+- **性能调节**：五档性能模式调整后台帧率、节流和视觉效果；已打开页面不会被自动销毁。
+- **受限插件系统**：插件使用声明式 JSON，由应用统一管理权限、配置、更新和网络访问。
+
+## 界面预览
 
 <p align="center">
-  <img src="docs/screenshots/01-isolated-sessions.png" alt="多个隔离会话与 GitHub Trending 浏览页面" width="100%" />
+  <img src="docs/screenshots/01-isolated-sessions.png" alt="StarBrowser 会话隔离浏览器主界面" width="100%" />
 </p>
-
-<p align="center"><b>一个窗口管理多个隔离身份：左侧选择会话，右侧使用完整 Chromium 网页。</b></p>
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/02-session-switch.png" alt="切换到另一个独立会话" /></td>
+    <td width="50%"><img src="docs/screenshots/02-session-switch.png" alt="快速切换独立浏览器会话" /></td>
     <td width="50%"><img src="docs/screenshots/03-favorites.png" alt="所有会话共享的收藏夹" /></td>
   </tr>
   <tr>
-    <td align="center"><b>切换会话就是切换完整浏览器身份</b></td>
-    <td align="center"><b>全局收藏夹快速打开常用网页</b></td>
+    <td align="center"><b>切换会话，切换完整浏览器身份</b></td>
+    <td align="center"><b>所有会话共享收藏</b></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/04-memo.png" alt="会话专属的大容量备注标签" /></td>
-    <td width="50%"><img src="docs/screenshots/05-session-settings.png" alt="会话自动回收设置" /></td>
+    <td width="50%"><img src="docs/screenshots/04-memo.png" alt="会话专属备注标签" /></td>
+    <td width="50%"><img src="docs/screenshots/05-session-settings.png" alt="会话名称和自动回收设置" /></td>
   </tr>
   <tr>
-    <td align="center"><b>备注与网页标签一起保存和排序</b></td>
-    <td align="center"><b>按规则管理会话生命周期</b></td>
+    <td align="center"><b>在独立标签中记录大量备注</b></td>
+    <td align="center"><b>管理会话信息与生命周期</b></td>
   </tr>
 </table>
 
-<p align="center">
-  <img src="docs/screenshots/06-performance.png" alt="适配不同硬件的五档性能设置" width="820" />
-</p>
+## 快速开始
 
-<p align="center"><b>从超低配到超高配，按设备决定后台页面保留范围。</b></p>
+1. 从 [Releases](https://github.com/aafqaq/StarBrowser/releases/latest) 下载 `StarBrowser-Windows-x64-v*.zip`。
+2. 将 ZIP **完整解压**到普通文件夹，不要只取出 EXE。
+3. 双击 `StarBrowser.exe`，新建会话并登录网站。
 
-<p align="center">
-  <img src="docs/screenshots/07-plugins.png" alt="StarBrowser 声明式插件中心" width="820" />
-</p>
-
-<p align="center"><b>默认保持纯净，需要时再从仓库安装受限的声明式插件。</b></p>
-
-## 🚀 三步开始使用
-
-1. 前往 [Releases](https://github.com/aafqaq/StarBrowser/releases/latest) 下载 `StarBrowser-Windows-x64-v*.zip`。
-2. 把 ZIP **完整解压到一个普通文件夹**，不要只单独拖出 EXE。
-3. 双击 `StarBrowser.exe`，新建会话后即可登录不同账号。
-
-软件无需安装。Chromium 运行文件、主程序和用户数据都会位于同一个文件夹中，适合放在桌面、移动硬盘或其他自选位置。
+支持 Windows 10 / 11 x64，无需安装，也不依赖电脑预装的浏览器内核。
 
 > [!IMPORTANT]
-> 请勿直接在 ZIP 压缩包内运行，也不要把 `StarBrowser.exe` 单独移动到别处；它需要同级的 `resources`、`locales` 等运行文件。
+> 请勿直接在压缩包内运行。移动软件时应先完全退出，再复制整个 StarBrowser 文件夹。
 
-## 📜 使用许可
+## 数据与隐私
 
-StarBrowser 的原创代码、界面、文档和原创项目资源采用 [PolyForm Noncommercial 1.0.0](LICENSE) 源码公开许可：
-
-- ✅ 个人学习、研究、娱乐及其他非商业用途可以免费使用。
-- ✅ 非商业修改和再分发可以进行，但必须保留许可文本和作者声明。
-- 🔐 用于商业产品、收费服务、转售、变现分发或企业商业运营前，必须先取得作者书面授权。
-- 📮 商业授权可通过 GitHub 账号 [@aafqaq](https://github.com/aafqaq) 或本仓库 Issues 联系。
-
-Electron、Chromium、Vue、Naive UI 等第三方组件不适用上述商业限制，仍各自遵循原许可证；详见 [第三方许可声明](THIRD_PARTY_NOTICES.md)。这是非商业源码公开许可，不属于 OSI 定义的开源许可证。
-
-## 🛡️ 数据放在哪里
-
-首次运行后，程序同级会出现：
+所有本地数据都保存在程序同级的 `data` 目录：
 
 ```text
 StarBrowser/
 ├─ StarBrowser.exe
-├─ resources/          软件运行文件
+├─ resources/          程序运行文件
 ├─ locales/            Chromium 语言文件
-└─ data/               你的全部本地数据
+└─ data/
    ├─ state.json       会话、标签、备注、收藏和设置
    ├─ state.backup.json
-   ├─ plugins/         已安装插件、独立配置和用量缓存
+   ├─ plugins/         插件配置与缓存
    └─ electron/        Cookie、Local Storage、IndexedDB、缓存等
 ```
 
-- ✅ 移动软件：先完全退出，然后复制**整个文件夹**。
-- ✅ 备份数据：退出软件后备份整个 `data` 文件夹。
-- ✅ 清空一切：退出软件后移走或删除 `data`；此操作不可恢复。
-- ❌ 不要在软件运行时用同步盘同时修改 `data`。
-- ❌ 不要把包含真实登录状态的 `data` 上传到网盘或公开仓库。
+- 备份时：完全退出软件，然后复制整个 `data` 文件夹。
+- 迁移时：复制完整的 StarBrowser 文件夹，或使用会话导入导出。
+- StarBrowser 不提供云同步，不会将会话、Cookie、备注、收藏或浏览记录上传到项目服务器。
+- `data` 可能包含有效登录凭证，请勿上传到公开仓库或交给他人。
 
-StarBrowser 不提供云同步，也不会把会话、Cookie、备注、收藏或浏览记录上传到项目服务器。用户主动安装的插件只会按权限说明访问其声明的网站接口；网页本身的数据处理仍受对应网站的隐私规则约束。
+## 更新与兼容
 
-## 🧩 插件中心
+StarBrowser 启动后会异步检查 GitHub Releases，也可在 **设置 → 检查更新** 中手动检查。更新包下载并通过 SHA-256 校验后，应用只替换程序清单内的文件，明确排除 `data`；更新失败时保留当前版本和数据。
 
-新安装的 StarBrowser 默认不安装任何插件。左下角进入 **插件** 后，可以查看仓库插件、已安装插件及各插件自己的设置：
+状态结构、浏览器存储、会话包格式和加密算法都具有独立版本号，为后续数据迁移保留兼容空间。
 
-- 在线插件只能从本仓库目录下载，安装和更新都会验证 SHA-256、插件 ID 与版本。
-- 也可手动导入符合 StarBrowser 声明式规范的 JSON 文件。
-- 插件不能运行 JavaScript；网络请求、会话匹配、定时、设置表单和卡片徽标均由插件引擎执行。
-- 卸载默认保留该插件的独立配置，也可以勾选同时删除配置。
-- 插件更新采用原子替换；更新失败时继续使用原版本，配置不会被覆盖。
+## 使用许可
 
-首个仓库插件是 **ChatGPT 用量展示**：它识别包含 `chatgpt.com` 标签的会话，不打开额外 WebView，直接使用对应隔离会话的登录凭证依次尝试读取非免费账号用量。成功后在会话卡片显示剩余比例和重置时间；未登录、账号异常或接口变化会显示带原因的叹号，免费账号不会显示徽标。ChatGPT 没有公开稳定的订阅剩余额度 API，因此该插件可能随网页接口变化而需要更新。
+StarBrowser 的原创代码、界面、文档和原创资源采用 [PolyForm Noncommercial 1.0.0](LICENSE)：
 
-## 🔄 自动更新如何保护数据
+- 个人学习、研究、娱乐及其他非商业用途可免费使用、修改和分发。
+- 商业产品、收费服务、转售、变现分发或企业商业运营须事先取得作者书面授权。
+- Electron、Chromium、Vue、Naive UI 等第三方组件仍遵循各自许可证，详见 [第三方许可声明](THIRD_PARTY_NOTICES.md)。
 
-每次启动后，StarBrowser 会延迟几秒异步访问本项目的 GitHub Releases。没有新版本时不会打扰使用；也可以在 **设置 → 检查更新** 中手动检查，并从设置直接打开 GitHub 给项目点 Star。
+商业授权请通过 [@aafqaq](https://github.com/aafqaq) 或 [Issues](https://github.com/aafqaq/StarBrowser/issues) 联系。
 
-发现新版后：
-
-1. 显示更新说明，可选择稍后处理或忽略这个版本。
-2. 在后台下载 ZIP，并实时显示百分比、已下载大小和速度。
-3. 完成 SHA-256 校验与受限解压后，才出现“重启并更新”。
-4. 重启时只替换程序清单内的软件文件，永远排除 `data` 和无法识别的用户文件。
-5. 新版启动通过健康检查后，自动删除下载包、解压目录和回滚副本。
-6. 如果替换失败或新版无法正常启动，自动恢复旧程序与更新前配置。
-
-兼容清单分别记录应用状态结构、Chromium 存储结构、会话包格式和加密算法版本。未来即使这些规则升级，也可以在新版本启动阶段执行迁移，而不是简单拒绝更新或覆盖旧配置。
-
-## 📦 会话导入导出
-
-会话菜单支持导出当前隔离会话，导入后会创建一个新会话：
-
-- 包含：会话名称、备注、标签页、Cookie、Local/Session Storage、IndexedDB 等登录凭证类数据。
-- 不包含：收藏夹、HTTP 缓存、网页快照和无关临时文件。
-- 当前格式：会话包格式 `v1`，加密算法 `v1`，使用 scrypt + AES-256-GCM。
-- 密码无法找回；请使用足够强的密码，并通过安全渠道传递会话包。
-
-## ⚡ 性能档位怎么选
-
-| 档位 | 适合设备 | 页面保留倾向 |
-|---|---|---|
-| 超低配 | 4 GB 左右内存、较老 CPU | 最积极释放后台页面，优先保证当前页面流畅 |
-| 低配 | 8 GB 左右内存 | 少量常用会话与标签常驻 |
-| 均衡 | 普通办公电脑 | 在内存占用和切换速度之间平衡 |
-| 高配 | 16–32 GB 内存 | 保留更多会话与标签，切换更快 |
-| 超高配 | 32 GB 以上或高性能工作站 | 最大化常驻数量和视觉体验 |
-
-首次启动会按硬件自动选择一个档位并固定保存。软件发现持续内存压力时只会提示推荐档位，不会擅自更改你的选择。
-
-## ❓ 常见问题
+## 常见问题
 
 <details>
-<summary><b>不同会话真的不会串登录吗？</b></summary>
+<summary><b>不同会话真的不会串登录状态吗？</b></summary>
 
-每个会话使用不同的持久化 Chromium partition。不同会话的 Cookie、本地存储和缓存目录互相隔离；同一会话中的所有标签页共享同一个 partition。
+每个会话使用不同的持久化 Chromium partition，因此 Cookie、本地存储、IndexedDB 和缓存目录彼此隔离；同一会话的标签页则共享一个 partition。
 </details>
 
 <details>
-<summary><b>后台页面为什么偶尔会重新加载？</b></summary>
+<summary><b>为什么 Windows 提示“未知发布者”？</b></summary>
 
-当实际保留数量超过当前性能档位预算时，StarBrowser 会释放较久未使用的网页进程。标签、网址、Cookie 和站点存储不会被删除，重新切换时页面会恢复加载。可在设置中提高性能档位。
+项目暂未使用商业代码签名证书，Windows SmartScreen 可能显示提醒。请只从本仓库 Releases 下载，并核对发布清单中的 SHA-256。
 </details>
 
 <details>
-<summary><b>Windows 提示“未知发布者”怎么办？</b></summary>
+<summary><b>支持 macOS 或 Linux 吗？</b></summary>
 
-源码公开项目暂未提供商业代码签名证书时，Windows SmartScreen 可能显示提醒。请只从本仓库 Releases 下载，并核对 Release 提供的 SHA-256 更新清单。不要使用来源不明的二次打包版本。
+目前只维护 Windows 10 / 11 x64。
 </details>
-
-<details>
-<summary><b>软件支持 macOS 或 Linux 吗？</b></summary>
-
-目前只维护 Windows 10/11 x64，其他平台不在支持范围内。
-</details>
-
-## 💜 喜欢的话
-
-如果 StarBrowser 让多账号管理轻松了一点，欢迎：
-
-- ⭐ 点击右上角 **Star**，让更多人看到项目
-- 🐛 在 [Issues](https://github.com/aafqaq/StarBrowser/issues) 报告可复现的问题
-- 💡 分享你希望加入的使用场景
-- 🔗 把项目推荐给同样需要多会话隔离的朋友
-
-<p align="center">
-  <a href="https://github.com/aafqaq/StarBrowser/stargazers"><img src="https://img.shields.io/github/stars/aafqaq/StarBrowser?style=social" alt="Star this repository" /></a>
-</p>
 
 ---
 
 <p align="center">
-  <sub>基于 Electron、Chromium、Vue 3 与 Naive UI · PolyForm Noncommercial 1.0.0</sub>
+  如果 StarBrowser 对你有帮助，欢迎点一个 <a href="https://github.com/aafqaq/StarBrowser/stargazers"><b>Star</b></a>，让更多需要会话隔离浏览器的人找到它。
 </p>

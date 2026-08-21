@@ -1,22 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="460" viewBox="0 0 1440 460" role="img" aria-label="StarBrowser banner">
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="420" viewBox="0 0 1440 420" role="img" aria-label="StarBrowser Windows 会话隔离浏览器">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#111327"/><stop offset=".48" stop-color="#24205a"/><stop offset="1" stop-color="#12172d"/></linearGradient>
-    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff74ca"/><stop offset=".42" stop-color="#746cff"/><stop offset="1" stop-color="#35d9ff"/></linearGradient>
-    <radialGradient id="glow"><stop stop-color="#756eff" stop-opacity=".55"/><stop offset="1" stop-color="#756eff" stop-opacity="0"/></radialGradient>
-    <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000" flood-opacity=".35"/></filter>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#111327"/>
+      <stop offset=".5" stop-color="#24205a"/>
+      <stop offset="1" stop-color="#12172d"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop stop-color="#756eff" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#756eff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#000" flood-opacity=".32"/>
+    </filter>
   </defs>
-  <rect width="1440" height="460" rx="34" fill="url(#bg)"/>
-  <circle cx="1180" cy="90" r="260" fill="url(#glow)"/><circle cx="210" cy="450" r="250" fill="url(#glow)" opacity=".55"/>
-  <g opacity=".72" fill="#fff"><circle cx="92" cy="80" r="2"/><circle cx="180" cy="112" r="1.5"/><circle cx="320" cy="58" r="2"/><circle cx="520" cy="98" r="1.5"/><circle cx="1320" cy="315" r="2"/><circle cx="1240" cy="370" r="1.5"/><circle cx="1060" cy="48" r="1.5"/></g>
-  <image href="brand-logo.png" x="935" y="24" width="380" height="380" preserveAspectRatio="xMidYMid meet" filter="url(#shadow)"/>
-  <g transform="translate(92 104)">
-    <text x="0" y="76" fill="#fff" font-family="Segoe UI Variable,Segoe UI,sans-serif" font-size="72" font-weight="750" letter-spacing="-2">StarBrowser</text>
-    <text x="4" y="125" fill="#b8b9d5" font-family="Microsoft YaHei UI,Segoe UI,sans-serif" font-size="23">便携、隔离、现代的 Windows 多会话浏览器</text>
-    <g transform="translate(3 164)" font-family="Microsoft YaHei UI,Segoe UI,sans-serif" font-size="15" font-weight="600">
-      <rect width="150" height="42" rx="21" fill="#756eff"/><text x="75" y="27" fill="#fff" text-anchor="middle">Chromium 内核</text>
-      <rect x="163" width="150" height="42" rx="21" fill="#ffffff" fill-opacity=".1" stroke="#ffffff" stroke-opacity=".15"/><text x="238" y="27" fill="#e8e8ff" text-anchor="middle">会话完全隔离</text>
-      <rect x="326" width="130" height="42" rx="21" fill="#ffffff" fill-opacity=".1" stroke="#ffffff" stroke-opacity=".15"/><text x="391" y="27" fill="#e8e8ff" text-anchor="middle">免安装</text>
-    </g>
-    <text x="4" y="258" fill="#8588aa" font-family="Segoe UI Variable,Segoe UI,sans-serif" font-size="15">Windows 10 / 11 · Electron + Vue 3 · Source Available</text>
+  <rect width="1440" height="420" rx="32" fill="url(#bg)"/>
+  <circle cx="1160" cy="90" r="245" fill="url(#glow)"/>
+  <circle cx="210" cy="430" r="235" fill="url(#glow)" opacity=".48"/>
+  <g opacity=".7" fill="#fff">
+    <circle cx="92" cy="76" r="2"/><circle cx="180" cy="108" r="1.5"/>
+    <circle cx="320" cy="54" r="2"/><circle cx="520" cy="94" r="1.5"/>
+    <circle cx="1320" cy="310" r="2"/><circle cx="1240" cy="360" r="1.5"/>
+  </g>
+  <image href="brand-logo.png" x="954" y="43" width="340" height="340" preserveAspectRatio="xMidYMid meet" filter="url(#shadow)"/>
+  <g transform="translate(92 94)">
+    <text x="0" y="70" fill="#fff" font-family="Segoe UI Variable,Segoe UI,sans-serif" font-size="72" font-weight="750" letter-spacing="-2">StarBrowser</text>
+    <text x="3" y="125" fill="#dedff5" font-family="Microsoft YaHei UI,Segoe UI,sans-serif" font-size="27" font-weight="600">Windows 会话隔离浏览器</text>
+    <text x="3" y="174" fill="#b8b9d5" font-family="Microsoft YaHei UI,Segoe UI,sans-serif" font-size="21">多账号独立登录 · 会话持久保存 · Chromium 内核 · 便携免安装</text>
+    <line x1="3" y1="213" x2="560" y2="213" stroke="#ffffff" stroke-opacity=".14"/>
+    <text x="3" y="255" fill="#8588aa" font-family="Microsoft YaHei UI,Segoe UI,sans-serif" font-size="16">Windows 10 / 11 · Electron · Vue 3</text>
   </g>
 </svg>
