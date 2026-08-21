@@ -388,6 +388,12 @@ function trimLiveTabs() {
   const maxLiveTabs = runtimeLiveBudget(policy)
   const maxTabsPerSession = runtimePerSessionBudget(policy)
   const allowedSessions = new Set(recentSessionIds.value.slice(0, runtimeSessionBudget(policy)))
+  // Never recycle a WebView belonging to the currently open session. Recreating
+  // a guest after a retention pass navigates it from `initialUrl` again, which
+  // looks like an unsolicited refresh and can also interrupt form/video state.
+  // Performance tiers still reduce memory by trimming inactive sessions and by
+  // throttling every background guest in the main process.
+  const activeSessionId = activeSession.value?.id || ''
   const liveSet = new Set(liveTabIds.value)
   const priority = [activeTab.value?.id || '', ...recentTabIds.value, ...liveTabIds.value].filter(Boolean)
   const keep: string[] = []
@@ -395,9 +401,10 @@ function trimLiveTabs() {
   for (const tabId of priority) {
     if (keep.includes(tabId) || !liveSet.has(tabId)) continue
     const owner = sessionByTab.get(tabId)
-    if (!owner || !allowedSessions.has(owner.id)) continue
+    if (!owner || (owner.id !== activeSessionId && !allowedSessions.has(owner.id))) continue
     const count = perSession.get(owner.id) || 0
-    if (count >= maxTabsPerSession || keep.length >= maxLiveTabs) continue
+    const isCurrentSession = owner.id === activeSessionId
+    if (!isCurrentSession && (count >= maxTabsPerSession || keep.length >= maxLiveTabs)) continue
     keep.push(tabId)
     perSession.set(owner.id, count + 1)
   }
@@ -1944,26 +1951,40 @@ onMounted(async () => {
       },
       multiTabRestoreStabilityCheck: async () => {
         const session = activeSession.value
-        if (!session || session.tabs.length < 2) return { primaryGuestStable: false, primaryNavigationStable: false, secondaryGuestReady: false, preloadRemoved: false }
+        if (!session || session.tabs.length < 2) return { primaryGuestStable: false, primaryNavigationStable: false, secondaryGuestReady: false, sameSessionRetained: false, sameSessionNavigationStable: false, preloadRemoved: false }
         const primary = session.tabs[0]
         const secondary = session.tabs[1]
+        const originalTier = state.value?.settings.performanceTier
+        const originalMemoryStatus = memoryStatus.value
         await activateTab(primary)
         await nextTick()
         const primaryGuestBefore = await waitForGuestId(primary.id)
         await new Promise((resolve) => window.setTimeout(resolve, 350))
         const primaryNavigationsBefore = mainFrameNavigationCounts.get(primary.id) || 0
-        removeLiveTab(secondary.id)
-        await nextTick()
         await activateTab(secondary)
         const secondaryGuest = await waitForGuestId(secondary.id)
         await new Promise((resolve) => window.setTimeout(resolve, 900))
+        if (state.value) state.value.settings.performanceTier = 'ultra-low'
+        memoryStatus.value = { ...originalMemoryStatus, level: 'critical' }
+        trimLiveTabs()
+        await new Promise((resolve) => window.setTimeout(resolve, 350))
         const primaryGuestAfter = guestIdFor(primary.id)
         const primaryNavigationsAfter = mainFrameNavigationCounts.get(primary.id) || 0
+        const secondaryGuestAfter = guestIdFor(secondary.id)
+        const secondaryNavigationsBefore = mainFrameNavigationCounts.get(secondary.id) || 0
+        trimLiveTabs()
+        await new Promise((resolve) => window.setTimeout(resolve, 350))
+        const secondaryNavigationsAfter = mainFrameNavigationCounts.get(secondary.id) || 0
+        if (state.value && originalTier) state.value.settings.performanceTier = originalTier
+        memoryStatus.value = originalMemoryStatus
+        applyPerformanceEnvironment(false)
         await activateTab(primary)
         return {
           primaryGuestStable: primaryGuestBefore > 0 && primaryGuestBefore === primaryGuestAfter,
           primaryNavigationStable: primaryNavigationsBefore === primaryNavigationsAfter,
-          secondaryGuestReady: secondaryGuest > 0,
+          secondaryGuestReady: secondaryGuest > 0 && secondaryGuestAfter > 0,
+          sameSessionRetained: liveTabIds.value.includes(primary.id) && liveTabIds.value.includes(secondary.id),
+          sameSessionNavigationStable: secondaryNavigationsBefore === secondaryNavigationsAfter,
           preloadRemoved: !('preconnect' in api.browser),
         }
       },
