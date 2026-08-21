@@ -819,6 +819,7 @@ async function installDownloadedUpdate() {
     workerScript: workerScriptPath,
     progressFile: updateProgressFile,
     failureFile: updateFailureFile,
+    handoffFile: handoffPath,
     version: downloadedUpdate.programManifest.version,
   })
   await updateFsp.rm(handoffPath, { force: true }).catch(() => {})

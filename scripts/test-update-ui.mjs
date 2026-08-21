@@ -10,6 +10,7 @@ const worker = path.join(root, 'worker.ps1')
 const ui = path.join(root, 'ui.ps1')
 const progress = path.join(root, 'progress.json')
 const failure = path.join(root, 'failure.log')
+const handoff = path.join(root, 'handoff.ready')
 const psLiteral = (value) => `'${String(value).replaceAll("'", "''")}'`
 const utf16Script = (source) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(source, 'utf16le')])
 
@@ -20,7 +21,7 @@ $progress = ${psLiteral(progress)}
 Start-Sleep -Milliseconds 350
 @{ phase = 'success'; percent = 100; message = 'complete'; detail = '' } | ConvertTo-Json -Compress | Set-Content -LiteralPath $progress -Encoding UTF8 -Force
 `
-  const uiSource = buildUpdateUiPowerShell({ workerScript: worker, progressFile: progress, failureFile: failure, version: '9.9.9' })
+  const uiSource = buildUpdateUiPowerShell({ workerScript: worker, progressFile: progress, failureFile: failure, handoffFile: handoff, version: '9.9.9' })
   await fsp.writeFile(worker, utf16Script(workerSource))
   await fsp.writeFile(ui, utf16Script(uiSource))
   const result = await new Promise((resolve, reject) => {
@@ -46,6 +47,7 @@ Start-Sleep -Milliseconds 350
     })
   })
   assert.equal(result.code, 0, `更新小窗退出异常：${result.output}`)
+  assert.ok((await fsp.readFile(handoff, 'utf8')).trim(), '更新小窗必须在界面初始化前确认接管')
   await assert.rejects(fsp.access(progress), '更新小窗完成后应清理进度状态')
   console.log(JSON.stringify({ ok: true, wpfUpdater: true, hiddenDuringTest: true }, null, 2))
 } finally {

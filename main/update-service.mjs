@@ -252,17 +252,38 @@ try {
   return script.trimStart()
 }
 
-export function buildUpdateUiPowerShell({ workerScript, progressFile, failureFile, version }) {
+export function buildUpdateUiPowerShell({ workerScript, progressFile, failureFile, handoffFile, version }) {
   const worker = path.resolve(workerScript)
   const progress = path.resolve(progressFile)
   const failure = path.resolve(failureFile)
+  const handoff = path.resolve(handoffFile || path.join(path.dirname(worker), 'handoff.ready'))
   const displayVersion = safeVersion(version)
   const script = String.raw`
 $ErrorActionPreference = 'Stop'
 $worker = ${psLiteral(worker)}
 $progressFile = ${psLiteral(progress)}
 $failureFile = ${psLiteral(failure)}
+$handoffFile = ${psLiteral(handoff)}
 $version = ${psLiteral(displayVersion)}
+
+$script:workerProcess = $null
+function Start-UpdateWorker {
+  $start = New-Object System.Diagnostics.ProcessStartInfo
+  $start.FileName = 'powershell.exe'
+  $start.Arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $worker.Replace('"', '""') + '"'
+  $start.WorkingDirectory = [IO.Path]::GetTempPath()
+  $start.UseShellExecute = $false
+  $start.CreateNoWindow = $true
+  $script:workerProcess = [Diagnostics.Process]::Start($start)
+  Set-Content -LiteralPath $handoffFile -Value ([DateTime]::UtcNow.ToString('o')) -Encoding ASCII -Force
+}
+
+# The worker and handoff start before WPF/XAML initialization. If a machine
+# cannot initialize the optional progress window, the actual update still runs.
+try { Start-UpdateWorker } catch {
+  Set-Content -LiteralPath $failureFile -Value ("无法启动更新工作进程：" + $_.Exception.Message) -Encoding UTF8 -Force
+  exit 1
+}
 
 Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
 [xml]$xaml = @'
@@ -313,17 +334,6 @@ $percentText = $window.FindName('PercentText')
 $closeButton = $window.FindName('CloseButton')
 $script:working = $true
 $script:successAt = $null
-$script:workerProcess = $null
-
-function Start-UpdateWorker {
-  $start = New-Object System.Diagnostics.ProcessStartInfo
-  $start.FileName = 'powershell.exe'
-  $start.Arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $worker.Replace('"', '""') + '"'
-  $start.WorkingDirectory = [IO.Path]::GetTempPath()
-  $start.UseShellExecute = $false
-  $start.CreateNoWindow = $true
-  $script:workerProcess = [Diagnostics.Process]::Start($start)
-}
 
 $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(120)
@@ -356,15 +366,7 @@ $timer.Add_Tick({
   }
 })
 $closeButton.Add_Click({ $window.Close() })
-$window.Add_ContentRendered({
-  try { Start-UpdateWorker } catch {
-    $script:working = $false
-    $statusText.Text = '无法启动更新程序。'
-    $detailText.Text = $_.Exception.Message
-    $closeButton.IsEnabled = $true
-  }
-  $timer.Start()
-})
+$window.Add_ContentRendered({ $timer.Start() })
 $window.Add_Closing({ if ($script:working) { $_.Cancel = $true } })
 [void]$window.ShowDialog()
 $timer.Stop()

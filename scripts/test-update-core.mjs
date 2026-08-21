@@ -29,9 +29,10 @@ const uiScript = buildUpdateUiPowerShell({
   workerScript: path.join(updates, 'apply-update-worker.ps1'),
   progressFile: path.join(target, 'data', 'update-progress.json'),
   failureFile: path.join(target, 'data', 'update-error.log'),
+  handoffFile: path.join(updates, 'handoff-test.ready'),
   version: '1.7.1',
 })
-assert.ok(uiScript.includes('正在更新 StarBrowser') && uiScript.includes('DispatcherTimer'), 'visible updater must show live progress')
+assert.ok(uiScript.includes('正在更新 StarBrowser') && uiScript.includes('DispatcherTimer') && uiScript.includes('handoff-test.ready'), 'visible updater must show live progress and acknowledge handoff early')
 const parsePowerShell = (source) => spawnSync('powershell.exe', [
   '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
   "$encoded = [Console]::In.ReadToEnd(); $source = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)); $tokens = $null; $errors = $null; [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | ForEach-Object { [Console]::Error.WriteLine($_.Message) }; exit 1 }",
