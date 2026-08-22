@@ -13,7 +13,7 @@ import { PluginService } from './plugin-service.mjs'
 import { removeUpdateTree, updateFs, updateFsp } from './update-filesystem.mjs'
 import {
   APP_COMPATIBILITY, UPDATE_API_URL, UPDATE_REPOSITORY, buildApplyUpdatePowerShell, buildUpdateUiPowerShell,
-  legacyProgramManifest, parseProgramManifest, parseReleaseCandidate, safeVersion,
+  createRuntimeId, legacyProgramManifest, parseProgramManifest, parseReleaseCandidate, safeVersion,
 } from './update-service.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -45,6 +45,8 @@ const updatesBaseRoot = path.join(dataRoot, 'updates')
 const updateFailureFile = path.join(dataRoot, 'update-error.log')
 const updateCleanupFile = path.join(dataRoot, 'update-cleanup-pending.log')
 const updateProgressFile = path.join(dataRoot, 'update-progress.json')
+const currentRuntimeId = createRuntimeId(process.versions.electron, process.platform, process.arch)
+const BLANK_PAGE_URL = 'data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Cmeta%20charset%3Dutf-8%3E%3Ctitle%3E%E6%96%B0%E6%A0%87%E7%AD%BE%E9%A1%B5%3C%2Ftitle%3E'
 const postUpdateToken = (process.argv.find((argument) => argument.startsWith('--post-update-token=')) || '').split('=')[1] || ''
 const postUpdateVersion = (process.argv.find((argument) => argument.startsWith('--post-update-version=')) || '').split('=')[1] || ''
 
@@ -266,7 +268,8 @@ function importedSession(payload) {
   const sourceTabs = Array.isArray(payload?.tabs) && payload.tabs.length ? payload.tabs : [createTab()]
   const tabIdMap = new Map()
   const tabs = sourceTabs.map((tab) => {
-    const next = createTab(/^https?:\/\//i.test(tab?.url || '') ? tab.url : 'https://www.bing.com/')
+    const sourceUrl = tab?.url === BLANK_PAGE_URL || /^https?:\/\//i.test(tab?.url || '') ? tab.url : BLANK_PAGE_URL
+    const next = createTab(sourceUrl)
     tabIdMap.set(tab?.id, next.id)
     next.title = String(tab?.title || '新标签页').slice(0, 500)
     next.favicon = typeof tab?.favicon === 'string' ? tab.favicon : ''
@@ -440,7 +443,7 @@ async function importSessionArchive(password) {
   }
 }
 
-function createTab(url = 'https://www.bing.com/') {
+function createTab(url = BLANK_PAGE_URL) {
   return {
     id: id(),
     title: '新标签页',
@@ -546,7 +549,7 @@ function normalizeState(candidate) {
     if (!current.tabs.length) current.tabs.push(createTab())
     for (const tab of current.tabs) {
       tab.id ||= id()
-      tab.url ||= 'https://www.bing.com/'
+      if (!tab.url || tab.url === 'about:blank') tab.url = BLANK_PAGE_URL
       tab.title ||= '新标签页'
       tab.favicon ||= ''
       tab.loading = false
@@ -634,6 +637,7 @@ function publicUpdateStatus() {
       publishedAt: updateCandidate.publishedAt,
       releaseUrl: updateCandidate.releaseUrl,
       size: updateCandidate.asset.size,
+      packageKind: updateCandidate.asset.kind,
       compatibility: updateCandidate.compatibility,
     } : null,
   }
@@ -668,7 +672,7 @@ async function checkForUpdates({ manual = false } = {}) {
     const manifestAsset = Array.isArray(release.assets) ? release.assets.find((asset) => asset?.name === 'latest.json') : null
     const manifest = manifestAsset?.browser_download_url ? await fetchJson(manifestAsset.browser_download_url) : { version: release.tag_name }
     const ignoredVersion = manual ? '' : state?.settings?.ignoredUpdateVersion || ''
-    const candidate = parseReleaseCandidate(release, manifest, app.getVersion(), ignoredVersion)
+    const candidate = parseReleaseCandidate(release, manifest, app.getVersion(), ignoredVersion, currentRuntimeId)
     if (!candidate) {
       updateCandidate = null
       downloadedUpdate = null
@@ -775,6 +779,7 @@ async function downloadUpdate() {
   if (!updateCandidate) throw new Error('没有可下载的更新')
   if (downloadedUpdate) return setUpdateStatus({ phase: 'downloaded', progress: 100 })
   if (updateWork) return updateWork
+  let downloadedAssetCompletely = false
   updateWork = (async () => {
     await staleUpdateCleanup
     const version = safeVersion(updateCandidate.version)
@@ -786,7 +791,7 @@ async function downloadUpdate() {
     await updateFsp.mkdir(versionRoot, { recursive: true })
     const disk = fs.statfsSync(dataRoot)
     const freeBytes = Number(disk.bavail) * Number(disk.bsize)
-    const requiredBytes = Math.max(512 * 1024 ** 2, updateCandidate.asset.size * 3)
+    const requiredBytes = Math.max((updateCandidate.asset.kind === 'app' ? 64 : 512) * 1024 ** 2, updateCandidate.asset.size * 3)
     if (freeBytes < requiredBytes) throw new Error(`磁盘可用空间不足，至少需要 ${Math.ceil(requiredBytes / 1024 ** 2)} MB`)
     const response = await net.fetch(updateCandidate.asset.url, {
       headers: { 'User-Agent': `StarBrowser/${app.getVersion()}` },
@@ -822,23 +827,45 @@ async function downloadUpdate() {
     } finally {
       await file.close()
     }
+    downloadedAssetCompletely = true
     if (hash.digest('hex').toLowerCase() !== updateCandidate.asset.sha256) throw new Error('更新包校验失败，文件可能不完整')
     setUpdateStatus({ phase: 'extracting', progress: 99, transferred, total: transferred, speed: 0 })
     await updateFsp.mkdir(payloadRoot, { recursive: true })
     await secureExtractZip(archivePath, payloadRoot)
     const programManifest = parseProgramManifest(JSON.parse(await updateFsp.readFile(path.join(payloadRoot, 'starbrowser-update.json'), 'utf8')))
     if (safeVersion(programManifest.version) !== version) throw new Error('更新包版本与发布版本不一致')
-    for (const name of programManifest.ownedTopLevel) {
-      if (!updateFs.existsSync(path.join(payloadRoot, name))) throw new Error(`更新包缺少程序文件：${name}`)
+    if (updateCandidate.asset.kind === 'app') {
+      if (!programManifest.runtimeId || programManifest.runtimeId !== currentRuntimeId || updateCandidate.asset.runtimeId !== currentRuntimeId) {
+        throw new Error('轻量更新包与当前浏览器核心不兼容，请重新检查更新以下载完整包')
+      }
+      for (const relative of ['resources/app.asar', 'starbrowser-update.json']) {
+        if (!updateFs.existsSync(path.join(payloadRoot, relative))) throw new Error(`轻量更新包缺少程序文件：${relative}`)
+      }
+    } else {
+      for (const name of programManifest.ownedTopLevel) {
+        if (!updateFs.existsSync(path.join(payloadRoot, name))) throw new Error(`更新包缺少程序文件：${name}`)
+      }
     }
-    downloadedUpdate = { versionRoot, payloadRoot, archivePath, programManifest }
+    downloadedUpdate = { versionRoot, payloadRoot, archivePath, programManifest, packageKind: updateCandidate.asset.kind }
     return setUpdateStatus({ phase: 'downloaded', progress: 100, transferred, total: transferred, speed: 0, error: '' })
   })().catch(async (error) => {
     const message = error instanceof Error ? error.message : String(error)
+    const fallbackAsset = downloadedAssetCompletely && updateCandidate?.asset?.kind === 'app'
+      ? updateCandidate.fallbackAsset
+      : null
     if (updateCandidate) {
       const failedRoot = path.join(updatesBaseRoot, safeVersion(updateCandidate.version))
       assertUpdateStage(failedRoot)
       await removeUpdateTree(failedRoot).catch(() => {})
+    }
+    if (fallbackAsset) {
+      // The small package reached disk but failed its checksum, extraction or
+      // runtime validation. Retry once with the independently hashed complete
+      // package instead of leaving the installation stuck on a bad lite asset.
+      updateCandidate = { ...updateCandidate, asset: fallbackAsset, fallbackAsset: null }
+      updateWork = null
+      setUpdateStatus({ phase: 'available', progress: 0, transferred: 0, total: fallbackAsset.size, speed: 0, error: '' })
+      return downloadUpdate()
     }
     return setUpdateStatus({ phase: 'error', error: message, speed: 0 })
   }).finally(() => { updateWork = null })
@@ -888,6 +915,7 @@ async function installDownloadedUpdate() {
     token,
     oldOwnedTopLevel: oldProgramManifest.ownedTopLevel,
     newOwnedTopLevel: downloadedUpdate.programManifest.ownedTopLevel,
+    packageKind: downloadedUpdate.packageKind,
   })
   const workerScriptPath = path.join(downloadedUpdate.versionRoot, 'apply-update-worker.ps1')
   const uiScriptPath = path.join(downloadedUpdate.versionRoot, 'apply-update.ps1')
@@ -1107,7 +1135,7 @@ function createWindow() {
   mainWindow.webContents.session.setSpellCheckerEnabled(false)
   mainWindow.setMenuBarVisibility(false)
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
-    if (!/^https?:\/\//i.test(params.src || '')) {
+    if (!/^https?:\/\//i.test(params.src || '') && params.src !== BLANK_PAGE_URL) {
       event.preventDefault()
       return
     }
@@ -1292,8 +1320,11 @@ async function runSmokeCheck() {
     error: '',
   }
   try {
+    report.stage = 'startup'
     await delay(2_000)
+    report.stage = 'transfer-archive'
     const transferArchive = await runTransferSmokeCheck()
+    report.stage = 'renderer-initial'
     const initial = await mainWindow.webContents.executeJavaScript(`(() => {
       const host = document.querySelector('.browser-host')?.getBoundingClientRect()
       const footer = document.querySelector('.sidebar-footer')?.getBoundingClientRect()
@@ -1338,6 +1369,11 @@ async function runSmokeCheck() {
     await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-testid="new-tab"]')?.click()`)
     await delay(800)
     const tabCountAfterCreate = await mainWindow.webContents.executeJavaScript(`document.querySelectorAll('.browser-tab:not(.memo-tab):not(.tab-drag-preview)').length`)
+    const blankNewTab = await mainWindow.webContents.executeJavaScript(`(() => {
+      const view = document.querySelector('webview.browser-webview.active')
+      const input = document.querySelector('.address-input input')
+      return { src: view?.getAttribute('src') || '', address: input?.value || '' }
+    })()`)
     const sessionSwitch = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.sessionSwitchTabOverlap()`)
     const expiryBadge = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.expiryBadgeCheck()`)
     const mixedWidthTabCrossing = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.mixedWidthTabCrossingCheck()`)
@@ -1385,6 +1421,7 @@ async function runSmokeCheck() {
       return result
     })()`)
 
+    report.stage = 'guest-before-modal'
     const guestBefore = await mainWindow.webContents.executeJavaScript(`(async () => {
       let id = 0
       let view = null
@@ -1401,9 +1438,19 @@ async function runSmokeCheck() {
     })()`)
     const activeGuest = webContents.fromId(guestBefore.id)
     if (activeGuest && !activeGuest.isDestroyed()) {
-      await activeGuest.executeJavaScript(`window.__starbrowserModalTicker = 0; window.__starbrowserModalTimer = setInterval(() => window.__starbrowserModalTicker++, 100)`)
+      let tickerReady = false
+      for (let attempt = 0; attempt < 50 && !tickerReady; attempt++) {
+        try {
+          await activeGuest.executeJavaScript(`window.__starbrowserModalTicker = 0; window.__starbrowserModalTimer = setInterval(() => window.__starbrowserModalTicker++, 100)`)
+          tickerReady = true
+        } catch {
+          await delay(100)
+        }
+      }
+      if (!tickerReady) throw new Error('空白标签页的 WebView 未触发 dom-ready')
     }
 
+    report.stage = 'settings-modal'
     await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-button"]')?.click()`)
     await delay(1_500)
     const modal = await mainWindow.webContents.executeJavaScript(`(() => ({
@@ -1445,9 +1492,11 @@ async function runSmokeCheck() {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
       return result
     })()`)
+    report.stage = 'modal-live-guest'
     const tickerDuringModal = activeGuest && !activeGuest.isDestroyed()
       ? await activeGuest.executeJavaScript(`window.__starbrowserModalTicker || 0`)
       : 0
+    report.stage = 'session-form'
     const sessionForm = await mainWindow.webContents.executeJavaScript(`(async () => {
       document.querySelector('[data-testid="settings-modal"] .n-card-header__extra button')?.click()
       await new Promise((resolve) => setTimeout(resolve, 700))
@@ -1472,6 +1521,7 @@ async function runSmokeCheck() {
         }
       }
     })()`)
+    report.stage = 'input-layer'
     const inputLayer = await mainWindow.webContents.executeJavaScript(`(async () => {
       document.querySelector('[data-testid="session-modal"] .n-card-header__extra button')?.click()
       await new Promise((resolve) => setTimeout(resolve, 900))
@@ -1529,6 +1579,7 @@ async function runSmokeCheck() {
       const afterSwitch = inspect()
       return { before, afterSwitch, switchedGuest: before.activeGuestId > 0 && afterSwitch.activeGuestId > 0 && before.activeGuestId !== afterSwitch.activeGuestId }
     })()`)
+    report.stage = 'memo-and-chrome'
     const memoAndChrome = await mainWindow.webContents.executeJavaScript(`(async () => {
       const roundTrip = await window.__starbrowserTest?.memoRoundTrip()
       const before = window.__starbrowserTest?.getHeaderOrder() || []
@@ -1637,7 +1688,7 @@ async function runSmokeCheck() {
         insideViewport: Boolean(rect && rect.left >= 8 && rect.top >= 8 && rect.right <= innerWidth - 8 && rect.bottom <= innerHeight - 8),
         versionShown: text.includes('v' + ${JSON.stringify(app.getVersion())}) && text.includes('v9.9.9'),
         actionsShown: ['忽略此版本', '稍后', '下载更新'].every((label) => text.includes(label)),
-        safetyShown: ['SHA-256 完整性校验', 'data 永不覆盖', '启动失败自动回滚', '兼容迁移清单'].every((label) => text.includes(label)),
+        safetyShown: ['轻量更新 · 保留浏览器核心', 'SHA-256 完整性校验', 'data 永不覆盖', '启动失败自动回滚'].every((label) => text.includes(label)),
         progressReady: Boolean(document.querySelector('[data-testid="update-modal"] .update-dialog'))
       }
       document.querySelector('[data-testid="update-modal"] .n-card-header__extra button')?.click()
@@ -1647,11 +1698,15 @@ async function runSmokeCheck() {
     const guestContextMenuReady = Boolean(activeAfterSwitch && !activeAfterSwitch.isDestroyed() && configuredGuestIds.has(activeAfterSwitch.id))
     const spellcheckDisabled = Boolean(activeAfterSwitch && !activeAfterSwitch.isDestroyed() && !activeAfterSwitch.session.isSpellCheckerEnabled() && !mainWindow.webContents.session.isSpellCheckerEnabled())
     const rendererContextMenuReady = mainWindow.webContents.listenerCount('context-menu') > 0
+    report.stage = 'stability'
     const activationStability = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.activationStabilityCheck()`)
+    report.stage = 'multi-tab-stability'
     const multiTabRestoreStability = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.multiTabRestoreStabilityCheck()`)
+    report.stage = 'hover-stability'
     const hoverPreload = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.hoverPreloadCheck()`)
+    report.stage = 'performance-policy'
     const performancePolicy = await mainWindow.webContents.executeJavaScript(`window.__starbrowserTest?.performancePolicyCheck()`)
-    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, sessionSwitch, expiryBadge, mixedWidthTabCrossing, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, sessionForm, inputLayer, memoAndChrome, favoritesUi, pluginUi, recycleOverlay, updateUi, activationStability, multiTabRestoreStability, hoverPreload, performancePolicy }
+    report.renderer = { ...initial, buttonFocus, tabCountAfterCreate, blankNewTab, sessionSwitch, expiryBadge, mixedWidthTabCrossing, neverRecyclePreserved, reorder, sessionMenuOverlay, modal, settingsSelectOverlay, sessionForm, inputLayer, memoAndChrome, favoritesUi, pluginUi, recycleOverlay, updateUi, activationStability, multiTabRestoreStability, hoverPreload, performancePolicy }
     report.transferArchive = transferArchive
     report.browser = {
       engine: 'dom-webview',
@@ -1670,7 +1725,7 @@ async function runSmokeCheck() {
       initial.sessionCard?.borderWidth === 0 && initial.sessionCard?.outlineWidth === 0 &&
       initial.scrollbar?.rightGap >= 3 && initial.scrollbar?.rightGap <= 8 && initial.scrollbar?.railWidth >= 5 &&
       buttonFocus.focusedBeforePointerRelease && buttonFocus.pointerFocusReleased && buttonFocus.keyboardFocusPreserved &&
-      tabCountAfterCreate === initial.tabCount + 1 && sessionSwitch?.noOverlap && expiryBadge?.days === 3 && expiryBadge?.visible && /^\d+天前$/.test(expiryBadge?.relativeTime || '') && expiryBadge?.aligned && expiryBadge?.singleTagLine && mixedWidthTabCrossing?.browserCanLeadMemo && mixedWidthTabCrossing?.memoCanFollowBrowser && neverRecyclePreserved && reorder.changed &&
+      tabCountAfterCreate === initial.tabCount + 1 && blankNewTab.src.startsWith('data:text/html') && blankNewTab.address === '' && sessionSwitch?.noOverlap && expiryBadge?.days === 3 && expiryBadge?.visible && /^\d+天前$/.test(expiryBadge?.relativeTime || '') && expiryBadge?.aligned && expiryBadge?.singleTagLine && mixedWidthTabCrossing?.browserCanLeadMemo && mixedWidthTabCrossing?.memoCanFollowBrowser && neverRecyclePreserved && reorder.changed &&
       reorder.before[0] === reorder.after[1] && JSON.stringify(reorder.after) === JSON.stringify(reorder.dom) &&
       JSON.stringify(reorder.targets) === JSON.stringify([0, 2, 3]) && sessionMenuOverlay.visible && sessionMenuOverlay.insideViewport && sessionMenuOverlay.teleported && sessionMenuOverlay.dismissLayer && sessionMenuOverlay.menuAboveDismissLayer && sessionMenuOverlay.dismissed &&
       modal.settingsVisible && modal.performanceSelect && modal.updateSettings && settingsSelectOverlay.modalInsideViewport && settingsSelectOverlay.modalContentScrollable &&
@@ -1697,7 +1752,8 @@ async function runSmokeCheck() {
       report.browser.guestIdStable && report.browser.videoSurfaceRemainedLive && report.browser.guestContextMenuReady && report.browser.rendererContextMenuReady && report.browser.spellcheckDisabled && !report.windowWasVisible
     )
   } catch (error) {
-    report.error = error instanceof Error ? error.stack || error.message : String(error)
+    const detail = error instanceof Error ? error.stack || error.message : String(error)
+    report.error = `[${report.stage || 'unknown'}] ${detail}`
   }
   await fsp.mkdir(dataRoot, { recursive: true })
   await fsp.writeFile(reportFile, JSON.stringify(report, null, 2), 'utf8')
@@ -1803,7 +1859,7 @@ function registerIpc() {
     updateCandidate = {
       version: '9.9.9', name: 'StarBrowser 9.9.9', notes: '新增自动更新中心\n优化便携数据兼容与更新回滚',
       publishedAt: new Date().toISOString(), releaseUrl: `https://github.com/${UPDATE_REPOSITORY}`,
-      asset: { name: 'smoke.zip', url: 'https://example.invalid/smoke.zip', size: 128 * 1024 ** 2, sha256: 'a'.repeat(64) },
+      asset: { kind: 'app', name: 'smoke.zip', url: 'https://example.invalid/smoke.zip', size: 2 * 1024 ** 2, sha256: 'a'.repeat(64), runtimeId: currentRuntimeId },
       compatibility: APP_COMPATIBILITY,
     }
     return setUpdateStatus({ phase: 'available', manual: false, progress: 0, total: updateCandidate.asset.size, transferred: 0, speed: 0, error: '' })

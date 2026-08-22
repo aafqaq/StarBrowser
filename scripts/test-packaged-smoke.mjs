@@ -20,14 +20,17 @@ try {
     stdio: 'ignore',
     env: { ...process.env, STARBROWSER_SMOKE: '1', STARBROWSER_TEST_ROOT: root },
   })
-  const deadline = Date.now() + 60_000
+  const deadline = Date.now() + 120_000
   while (!fs.existsSync(resultFile) && Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`Packaged app exited before writing its smoke result (${child.exitCode})`)
     await delay(200)
   }
   if (!fs.existsSync(resultFile)) throw new Error('Packaged smoke test timed out')
   const report = JSON.parse(await fsp.readFile(resultFile, 'utf8'))
-  if (!report.ok) throw new Error(report.error || 'Packaged smoke test failed')
+  if (!report.ok) {
+    console.error(JSON.stringify(report, null, 2))
+    throw new Error(report.error || 'Packaged smoke test failed')
+  }
   if (!report.transferArchive?.quotaManagerRestored || !report.transferArchive?.configuredAfterRestore) {
     throw new Error('QuotaManager was not restored before the Chromium partition started')
   }

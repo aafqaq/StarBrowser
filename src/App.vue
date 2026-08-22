@@ -24,6 +24,7 @@ type ModalKind = '' | 'session' | 'favorites' | 'plugins' | 'settings' | 'recycl
 type HeaderItem = { id: string; kind: 'browser'; tab: BrowserTab } | { id: '__memo__'; kind: 'memo' }
 
 const api = window.starbrowser
+const BLANK_PAGE_URL = 'data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Cmeta%20charset%3Dutf-8%3E%3Ctitle%3E%E6%96%B0%E6%A0%87%E7%AD%BE%E9%A1%B5%3C%2Ftitle%3E'
 const state = ref<AppState | null>(null)
 const address = ref('')
 const modalKind = ref<ModalKind>('')
@@ -233,8 +234,13 @@ function uid() {
   return crypto.randomUUID().replaceAll('-', '')
 }
 
-function createTab(url = 'https://www.bing.com/'): BrowserTab {
+function createTab(url = BLANK_PAGE_URL): BrowserTab {
   return { id: uid(), title: '新标签页', url, favicon: '', loading: false, canGoBack: false, canGoForward: false, createdAt: new Date().toISOString() }
+}
+
+function addressForTab(url: string | null | undefined) {
+  const value = String(url || '')
+  return value === BLANK_PAGE_URL || value.toLowerCase() === 'about:blank' ? '' : value
 }
 
 function createSession(name = '新会话'): BrowserSession {
@@ -329,6 +335,61 @@ async function waitForGuestId(tabId: string, attempts = 50) {
     await new Promise((resolve) => window.setTimeout(resolve, 100))
   }
   return 0
+}
+
+async function waitForGuestReady(tabId: string, attempts = 50) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const view = webviewFor(tabId)
+    try {
+      if (view?.getWebContentsId()) {
+        await view.executeJavaScript('true')
+        return true
+      }
+    } catch { /* about:blank can expose an id shortly before dom-ready */ }
+    await new Promise((resolve) => window.setTimeout(resolve, 100))
+  }
+  return false
+}
+
+async function executeWebviewSafely<T>(tabId: string, source: string, fallback: T): Promise<T> {
+  const view = webviewFor(tabId)
+  if (!view) return fallback
+  try {
+    return await view.executeJavaScript(source) as T
+  } catch {
+    return fallback
+  }
+}
+
+function focusWebview(tabId: string) {
+  const view = webviewFor(tabId)
+  if (!view) return
+  try {
+    view.focus()
+  } catch {
+    view.addEventListener('dom-ready', () => {
+      try { view.focus() } catch { /* The tab may have closed while waiting. */ }
+    }, { once: true })
+  }
+}
+
+function loadWebviewWhenReady(tabId: string, url: string) {
+  const view = webviewFor(tabId)
+  if (!view) return
+  const load = () => {
+    const current = state.value?.sessions.flatMap((session) => session.tabs).find((tab) => tab.id === tabId)
+    if (!current || current.url !== url) return
+    try {
+      const task = view.loadURL(url)
+      if (task && typeof task.catch === 'function') void task.catch(() => {})
+    } catch { /* The dom-ready listener below handles an early call. */ }
+  }
+  try {
+    const task = view.loadURL(url)
+    if (task && typeof task.catch === 'function') void task.catch(() => {})
+  } catch {
+    view.addEventListener('dom-ready', load, { once: true })
+  }
 }
 
 function removeLiveTab(tabId: string) {
@@ -511,11 +572,11 @@ async function activateTab(tab: BrowserTab) {
   if (!session) return
   session.memoActive = false
   session.activeTabId = tab.id
-  address.value = tab.url
+  address.value = addressForTab(tab.url)
   ensureLiveTab(tab, session)
   persist()
   await nextTick()
-  webviewFor(tab.id)?.focus()
+  focusWebview(tab.id)
   void syncGuestPerformance()
 }
 
@@ -583,7 +644,7 @@ async function submitSessionTransfer() {
   }
 }
 
-async function newTab(url = 'https://www.bing.com/') {
+async function newTab(url = BLANK_PAGE_URL) {
   const session = activeSession.value
   if (!session) return
   const tab = createTab(url)
@@ -789,7 +850,7 @@ function cancelFavoritePointer(event: PointerEvent) {
 
 function normalizeUrl(input: string) {
   const value = input.trim()
-  if (!value) return 'https://www.bing.com/'
+  if (!value) return BLANK_PAGE_URL
   if (/^https?:\/\//i.test(value)) return value
   if (/^[\w.-]+\.[a-z]{2,}(?:[/:?#].*)?$/i.test(value)) return `https://${value}`
   return `https://www.bing.com/search?q=${encodeURIComponent(value)}`
@@ -809,7 +870,7 @@ function navigate() {
     // loadURL again here would create the very duplicate navigation this
     // recovery path is intended to avoid.
     ensureLiveTab(tab, activeSession.value)
-    void nextTick(() => webviewFor(tab.id)?.focus())
+    void nextTick(() => focusWebview(tab.id))
     return
   }
   if (!isLiveView) {
@@ -820,12 +881,12 @@ function navigate() {
     ensureLiveTab(tab, activeSession.value)
     void nextTick(() => {
       const restored = webviewFor(tab.id)
-      if (restored) void restored.loadURL(url)
-      restored?.focus()
+      if (restored) loadWebviewWhenReady(tab.id, url)
+      focusWebview(tab.id)
     })
     return
   }
-  void view?.loadURL(url)
+  loadWebviewWhenReady(tab.id, url)
 }
 
 function browserAction(action: 'back' | 'forward' | 'reload' | 'stop') {
@@ -833,7 +894,7 @@ function browserAction(action: 'back' | 'forward' | 'reload' | 'stop') {
   if (!view) {
     if (action === 'reload' && activeTab.value) {
       ensureLiveTab(activeTab.value, activeSession.value)
-      void nextTick(() => webviewFor(activeTab.value?.id || '')?.focus())
+      void nextTick(() => focusWebview(activeTab.value?.id || ''))
     }
     return
   }
@@ -1587,7 +1648,7 @@ function patchWebviewTab(event: Event, patch: Partial<BrowserTab>) {
   const changedKeys = (Object.keys(patch) as Array<keyof BrowserTab>).filter((key) => target.tab[key] !== patch[key])
   if (!changedKeys.length) return
   Object.assign(target.tab, patch)
-  if (target.tab.id === activeTab.value?.id && patch.url) address.value = patch.url
+  if (target.tab.id === activeTab.value?.id && patch.url) address.value = addressForTab(patch.url)
   if (changedKeys.some((key) => key === 'url' || key === 'title' || key === 'favicon')) scheduleBrowserPersist()
 }
 
@@ -1692,7 +1753,7 @@ onMounted(async () => {
   if (sessionList.value) sessionScrollbar = new PerfectScrollbar(sessionList.value, { suppressScrollX: true, wheelPropagation: false })
   const session = activeSession.value
   if (session) {
-    address.value = activeTab.value?.url || ''
+    address.value = addressForTab(activeTab.value?.url)
     if (!session.memoActive && activeTab.value) await activateTab(activeTab.value)
   }
   applyPerformanceEnvironment()
@@ -1972,6 +2033,7 @@ onMounted(async () => {
         await activateTab(tab)
         await nextTick()
         const beforeGuestId = await waitForGuestId(tab.id)
+        await waitForGuestReady(tab.id)
         await new Promise((resolve) => window.setTimeout(resolve, 500))
         const beforeNavigations = mainFrameNavigationCounts.get(tab.id) || 0
         await activateTab(tab)
@@ -1999,8 +2061,8 @@ onMounted(async () => {
         await activateTab(primary)
         await nextTick()
         const primaryGuestBefore = await waitForGuestId(primary.id)
-        const primaryView = webviewFor(primary.id)
-        const primaryInputBefore = await primaryView?.executeJavaScript(`(() => {
+        await waitForGuestReady(primary.id)
+        const primaryInputBefore = await executeWebviewSafely(primary.id, `(() => {
           let input = document.querySelector('[data-starbrowser-retention-input]')
           if (!input) {
             input = document.createElement('textarea')
@@ -2011,14 +2073,14 @@ onMounted(async () => {
           input.value = 'typed-primary'
           window.__starbrowserRetentionMarker = 'primary'
           return input.value
-        })()`).catch(() => '')
+        })()`, '')
         await new Promise((resolve) => window.setTimeout(resolve, 350))
         const primaryNavigationsBefore = mainFrameNavigationCounts.get(primary.id) || 0
         const domOrderBefore = [...document.querySelectorAll<HTMLElement>('webview.browser-webview')].map((view) => view.dataset.tabId || '')
         await activateTab(secondary)
         const secondaryGuest = await waitForGuestId(secondary.id)
-        const secondaryView = webviewFor(secondary.id)
-        const secondaryInputBefore = await secondaryView?.executeJavaScript(`(() => {
+        await waitForGuestReady(secondary.id)
+        const secondaryInputBefore = await executeWebviewSafely(secondary.id, `(() => {
           let input = document.querySelector('[data-starbrowser-retention-input]')
           if (!input) {
             input = document.createElement('textarea')
@@ -2029,7 +2091,7 @@ onMounted(async () => {
           input.value = 'typed-secondary'
           window.__starbrowserRetentionMarker = 'secondary'
           return input.value
-        })()`).catch(() => '')
+        })()`, '')
         await new Promise((resolve) => window.setTimeout(resolve, 900))
         if (state.value) state.value.settings.performanceTier = 'ultra-low'
         memoryStatus.value = { ...originalMemoryStatus, level: 'critical' }
@@ -2043,10 +2105,10 @@ onMounted(async () => {
         trimLiveTabs()
         await new Promise((resolve) => window.setTimeout(resolve, 350))
         const secondaryNavigationsAfter = mainFrameNavigationCounts.get(secondary.id) || 0
-        const primaryMarker = await webviewFor(primary.id)?.executeJavaScript('window.__starbrowserRetentionMarker || ""').catch(() => '')
-        const secondaryMarker = await webviewFor(secondary.id)?.executeJavaScript('window.__starbrowserRetentionMarker || ""').catch(() => '')
-        const primaryInputAfter = await webviewFor(primary.id)?.executeJavaScript("document.querySelector('[data-starbrowser-retention-input]')?.value || ''").catch(() => '')
-        const secondaryInputAfter = await webviewFor(secondary.id)?.executeJavaScript("document.querySelector('[data-starbrowser-retention-input]')?.value || ''").catch(() => '')
+        const primaryMarker = await executeWebviewSafely(primary.id, 'window.__starbrowserRetentionMarker || ""', '')
+        const secondaryMarker = await executeWebviewSafely(secondary.id, 'window.__starbrowserRetentionMarker || ""', '')
+        const primaryInputAfter = await executeWebviewSafely(primary.id, "document.querySelector('[data-starbrowser-retention-input]')?.value || ''", '')
+        const secondaryInputAfter = await executeWebviewSafely(secondary.id, "document.querySelector('[data-starbrowser-retention-input]')?.value || ''", '')
         if (state.value && originalTier) state.value.settings.performanceTier = originalTier
         memoryStatus.value = originalMemoryStatus
         applyPerformanceEnvironment(false)
@@ -2164,7 +2226,7 @@ const unsubscribe = [
   api.plugins.onState((value) => { pluginState.value = value }),
 ]
 
-watch(activeTab, (tab) => { if (tab) address.value = tab.url })
+watch(activeTab, (tab) => { if (tab) address.value = addressForTab(tab.url) })
 watch(effectivePerformanceTier, () => applyPerformanceEnvironment(), { flush: 'post' })
 watch(() => [state.value?.sessions.length || 0, sidebarCollapsed.value], async () => {
   await nextTick()
@@ -2470,7 +2532,7 @@ onBeforeUnmount(() => {
             <p class="form-hint">关闭标签或会话才会释放对应浏览器进程。若页面进程真实崩溃，标签会保留并提示，只有你点击标签或刷新时才显式恢复；Cookie、本地存储、IndexedDB 与登录信息始终保存在隔离数据目录。</p>
             <div class="settings-update-card">
               <span class="settings-update-icon"><n-icon><RocketOutline /></n-icon></span>
-              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.9' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
+              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.9.0' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
               <n-button size="small" secondary @click="openGithubProject"><template #icon><n-icon><StarOutline /></n-icon></template>GitHub</n-button>
               <n-button size="small" type="primary" :loading="updateInfo.phase === 'checking'" @click="checkForUpdatesManually">检查更新</n-button>
             </div>
@@ -2500,7 +2562,7 @@ onBeforeUnmount(() => {
               <div>
                 <n-tag round size="small" type="info">v{{ updateInfo.currentVersion }} → v{{ updateInfo.candidate?.version || updateInfo.currentVersion }}</n-tag>
                 <h3>{{ updateInfo.phase === 'downloaded' ? '更新已准备完成' : updateInfo.candidate?.name || 'StarBrowser 更新' }}</h3>
-                <p v-if="updateInfo.phase === 'available'">先在后台完整下载并校验，下载完成后由你决定何时重启更新。</p>
+                <p v-if="updateInfo.phase === 'available'">{{ updateInfo.candidate?.packageKind === 'app' ? '浏览器核心兼容，仅下载轻量应用更新；下载完成后由你决定何时重启。' : '浏览器核心需要同步升级，将下载完整包并在安装前校验。' }}</p>
                 <p v-else-if="updateInfo.phase === 'downloading'">正在后台下载，网页和视频可以继续使用。</p>
                 <p v-else-if="updateInfo.phase === 'extracting'">下载完成，正在校验和准备更新文件。</p>
                 <p v-else-if="updateInfo.phase === 'downloaded'">重启后原地替换程序；data、会话登录状态与用户文件不会被覆盖。</p>
@@ -2515,7 +2577,7 @@ onBeforeUnmount(() => {
             <div v-if="updateInfo.error" class="update-error"><n-icon><InformationCircleOutline /></n-icon><span>{{ updateInfo.error }}</span></div>
             <div v-if="updateInfo.candidate?.notes" class="update-notes"><strong>本次更新</strong><p>{{ updateInfo.candidate.notes }}</p></div>
             <div class="update-safety">
-              <span>SHA-256 完整性校验</span><span>data 永不覆盖</span><span>启动失败自动回滚</span><span>兼容迁移清单</span>
+              <span>{{ updateInfo.candidate?.packageKind === 'app' ? '轻量更新 · 保留浏览器核心' : '完整更新 · 同步浏览器核心' }}</span><span>SHA-256 完整性校验</span><span>data 永不覆盖</span><span>启动失败自动回滚</span>
             </div>
             <div class="dialog-actions update-actions">
               <n-button quaternary @click="openGithubProject"><template #icon><n-icon><OpenOutline /></n-icon></template>查看项目</n-button>

@@ -49,18 +49,25 @@ jobs:
       - name: Test portable updater handoff and locked ASAR cleanup
         run: npm run test:update:integration
 
-      - name: Create update ZIP and compatibility manifest
+      - name: Create full and lightweight update packages
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $archive = "StarBrowser-Windows-x64-v$version.zip"
-          Compress-Archive -LiteralPath (Get-ChildItem -LiteralPath dist | ForEach-Object FullName) -DestinationPath $archive -CompressionLevel Optimal
-          node scripts/create-update-manifest.mjs $archive latest.json
-          "ARCHIVE_NAME=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $fullArchive = "StarBrowser-Windows-x64-v$version.zip"
+          $appArchive = "StarBrowser-App-v$version.zip"
+          Compress-Archive -LiteralPath (Get-ChildItem -LiteralPath dist | ForEach-Object FullName) -DestinationPath $fullArchive -CompressionLevel Optimal
+          $appPayload = Join-Path $env:RUNNER_TEMP "starbrowser-app-payload"
+          New-Item -ItemType Directory -Path (Join-Path $appPayload "resources") -Force | Out-Null
+          Copy-Item -LiteralPath "dist/resources/app.asar" -Destination (Join-Path $appPayload "resources/app.asar")
+          Copy-Item -LiteralPath "dist/starbrowser-update.json" -Destination (Join-Path $appPayload "starbrowser-update.json")
+          Compress-Archive -LiteralPath (Get-ChildItem -LiteralPath $appPayload | ForEach-Object FullName) -DestinationPath $appArchive -CompressionLevel Optimal
+          node scripts/create-update-manifest.mjs $fullArchive $appArchive latest.json
+          "FULL_ARCHIVE_NAME=$fullArchive" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "APP_ARCHIVE_NAME=$appArchive" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" "$env:ARCHIVE_NAME" latest.json --title "StarBrowser ${{ github.ref_name }}" --generate-notes --verify-tag
+          gh release create "${{ github.ref_name }}" "$env:FULL_ARCHIVE_NAME" "$env:APP_ARCHIVE_NAME" latest.json --title "StarBrowser ${{ github.ref_name }}" --generate-notes --verify-tag

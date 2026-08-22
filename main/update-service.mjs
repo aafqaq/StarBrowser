@@ -11,6 +11,16 @@ export const APP_COMPATIBILITY = Object.freeze({
   sessionExportAlgorithmVersions: [1],
 })
 
+export function createRuntimeId(electronVersion, platform = 'win32', arch = 'x64') {
+  const version = String(electronVersion || '').trim()
+  const operatingSystem = String(platform || '').trim().toLowerCase()
+  const architecture = String(arch || '').trim().toLowerCase()
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version) || !/^[a-z0-9_-]+$/.test(operatingSystem) || !/^[a-z0-9_-]+$/.test(architecture)) {
+    throw new Error('浏览器核心兼容标识无效')
+  }
+  return `electron-${version}-${operatingSystem}-${architecture}`
+}
+
 const legacyOwnedTopLevel = [
   'StarBrowser.exe', 'chrome_100_percent.pak', 'chrome_200_percent.pak', 'd3dcompiler_47.dll',
   'ffmpeg.dll', 'icudtl.dat', 'libEGL.dll', 'libGLESv2.dll', 'LICENSE.electron.txt',
@@ -62,18 +72,48 @@ export function parseProgramManifest(candidate, fallback = false) {
   if (!ownedTopLevel.includes('StarBrowser.exe') || !ownedTopLevel.includes('resources')) {
     throw new Error('更新包程序清单不完整')
   }
-  return { manifestVersion: Number(manifest.manifestVersion) || 1, version: String(manifest.version || ''), ownedTopLevel }
+  return {
+    manifestVersion: Number(manifest.manifestVersion) || 1,
+    version: String(manifest.version || ''),
+    runtimeId: typeof manifest.runtimeId === 'string' ? manifest.runtimeId : '',
+    ownedTopLevel,
+  }
 }
 
-export function parseReleaseCandidate(release, manifest, currentVersion, ignoredVersion = '') {
+function releaseAsset(releaseAssets, descriptor, fallbackName, kind) {
+  if (!descriptor && !fallbackName) return null
+  const requestedName = String(descriptor?.name || fallbackName || '')
+  const asset = releaseAssets.find((item) => item?.name === requestedName)
+  if (!asset?.browser_download_url) return null
+  return {
+    kind,
+    name: requestedName,
+    url: String(asset.browser_download_url),
+    size: Math.max(0, Number(asset.size) || Number(descriptor?.size) || 0),
+    sha256: safeSha256(asset.digest || descriptor?.sha256),
+    runtimeId: String(descriptor?.runtimeId || ''),
+  }
+}
+
+export function parseReleaseCandidate(release, manifest, currentVersion, ignoredVersion = '', currentRuntimeId = '') {
   if (!release || release.draft || release.prerelease) return null
   const version = safeVersion(manifest?.version || release.tag_name)
   if (compareVersions(version, currentVersion) <= 0 || version === ignoredVersion) return null
   const assets = Array.isArray(release.assets) ? release.assets : []
-  const requestedName = String(manifest?.asset?.name || `StarBrowser-Windows-x64-v${version}.zip`)
-  const asset = assets.find((item) => item?.name === requestedName)
-  if (!asset?.browser_download_url) throw new Error('GitHub Release 中缺少 Windows 更新包')
-  const sha256 = safeSha256(asset.digest || manifest?.asset?.sha256)
+  const fullDescriptor = manifest?.assets?.full || manifest?.asset
+  const appDescriptor = manifest?.assets?.app
+  let matchingAppPackage = null
+  if (appDescriptor && currentRuntimeId && String(appDescriptor.runtimeId || '') === currentRuntimeId) {
+    try {
+      matchingAppPackage = releaseAsset(assets, appDescriptor, '', 'app')
+    } catch {
+      // A malformed lite descriptor must not block a safe complete update.
+      matchingAppPackage = null
+    }
+  }
+  const fullPackage = releaseAsset(assets, fullDescriptor, `StarBrowser-Windows-x64-v${version}.zip`, 'full')
+  const asset = matchingAppPackage || fullPackage
+  if (!asset) throw new Error(matchingAppPackage === null && appDescriptor && currentRuntimeId ? '浏览器核心不兼容且缺少完整更新包' : 'GitHub Release 中缺少 Windows 更新包')
   const compatibility = manifest?.compatibility && typeof manifest.compatibility === 'object'
     ? manifest.compatibility
     : APP_COMPATIBILITY
@@ -83,12 +123,8 @@ export function parseReleaseCandidate(release, manifest, currentVersion, ignored
     notes: String(release.body || manifest?.notes || '本次更新包含体验优化与问题修复。').slice(0, 12_000),
     publishedAt: String(release.published_at || manifest?.publishedAt || ''),
     releaseUrl: String(release.html_url || `https://github.com/${UPDATE_REPOSITORY}/releases/tag/v${version}`),
-    asset: {
-      name: requestedName,
-      url: String(asset.browser_download_url),
-      size: Math.max(0, Number(asset.size) || Number(manifest?.asset?.size) || 0),
-      sha256,
-    },
+    asset,
+    fallbackAsset: asset.kind === 'app' ? fullPackage : null,
     compatibility,
   }
 }
@@ -101,7 +137,7 @@ function psArray(values) {
   return `@(${values.map(psLiteral).join(',')})`
 }
 
-export function buildApplyUpdatePowerShell({ targetRoot, payloadRoot, updatesRoot, mainPid, token, oldOwnedTopLevel, newOwnedTopLevel }) {
+export function buildApplyUpdatePowerShell({ targetRoot, payloadRoot, updatesRoot, mainPid, token, oldOwnedTopLevel, newOwnedTopLevel, packageKind = 'full' }) {
   const target = path.resolve(targetRoot)
   const payload = path.resolve(payloadRoot)
   const updates = path.resolve(updatesRoot)
@@ -111,6 +147,7 @@ export function buildApplyUpdatePowerShell({ targetRoot, payloadRoot, updatesRoo
   const oldOwned = normalizeOwnedTopLevel(oldOwnedTopLevel, true)
   const newOwned = normalizeOwnedTopLevel(newOwnedTopLevel)
   if (!newOwned.includes('StarBrowser.exe') || !newOwned.includes('resources')) throw new Error('待安装文件清单不完整')
+  if (!['app', 'full'].includes(packageKind)) throw new Error('更新包类型无效')
   const script = String.raw`
 $ErrorActionPreference = 'Stop'
 $target = ${psLiteral(target)}
@@ -126,8 +163,10 @@ $failureLog = Join-Path $data 'update-error.log'
 $cleanupLog = Join-Path $data 'update-cleanup-pending.log'
 $progressFile = Join-Path $data 'update-progress.json'
 $mainPid = ${Number(mainPid)}
+$packageKind = ${psLiteral(packageKind)}
 $oldOwned = ${psArray(oldOwned)}
 $newOwned = ${psArray(newOwned)}
+$appFiles = @('resources\app.asar', 'starbrowser-update.json')
 $exe = Join-Path $target 'StarBrowser.exe'
 $programChanged = $false
 
@@ -199,9 +238,17 @@ function Assert-SafeRoot {
   if (-not (Test-PathWithin $updatesFull $payloadFull)) {
     throw "更新负载目录越界（$diagnostic）"
   }
-  $payloadExe = Join-Path $payloadFull 'StarBrowser.exe'
-  if (-not (Test-Path -LiteralPath $payloadExe -PathType Leaf)) {
-    throw "更新负载缺少主程序（$diagnostic）"
+  if ($packageKind -eq 'app') {
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "现有主程序不存在（$diagnostic）" }
+    foreach ($relative in $appFiles) {
+      $item = Join-Path $payloadFull $relative
+      if (-not (Test-Path -LiteralPath $item -PathType Leaf)) { throw "轻量更新负载缺少 $relative（$diagnostic）" }
+    }
+  } else {
+    $payloadExe = Join-Path $payloadFull 'StarBrowser.exe'
+    if (-not (Test-Path -LiteralPath $payloadExe -PathType Leaf)) {
+      throw "更新负载缺少主程序（$diagnostic）"
+    }
   }
 }
 
@@ -222,9 +269,22 @@ function Invoke-WithRetry([string]$operation, [scriptblock]$action) {
 }
 
 function Restore-Program {
-  Remove-Owned $newOwned
-  if (Test-Path -LiteralPath $backup) {
-    Get-ChildItem -LiteralPath $backup | ForEach-Object { $source = $_.FullName; Invoke-WithRetry "恢复 $($_.Name)" { Move-Item -LiteralPath $source -Destination $target -Force } }
+  if ($packageKind -eq 'app') {
+    foreach ($relative in $appFiles) {
+      $installed = Join-Path $target $relative
+      if (Test-Path -LiteralPath $installed) { Invoke-WithRetry "移除新版 $relative" { Remove-Item -LiteralPath $installed -Force -ErrorAction Stop } }
+      $saved = Join-Path $backup $relative
+      if (Test-Path -LiteralPath $saved) {
+        $destinationParent = Split-Path -Parent $installed
+        New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+        Invoke-WithRetry "恢复 $relative" { Move-Item -LiteralPath $saved -Destination $installed -Force -ErrorAction Stop }
+      }
+    }
+  } else {
+    Remove-Owned $newOwned
+    if (Test-Path -LiteralPath $backup) {
+      Get-ChildItem -LiteralPath $backup | ForEach-Object { $source = $_.FullName; Invoke-WithRetry "恢复 $($_.Name)" { Move-Item -LiteralPath $source -Destination $target -Force } }
+    }
   }
   if (Test-Path -LiteralPath $safety) {
     foreach ($name in @('state.json','state.backup.json','compatibility.json')) {
@@ -253,16 +313,34 @@ try {
   if (Test-Path -LiteralPath $backup) { Invoke-WithRetry '清理旧回滚目录' { Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction Stop } }
   New-Item -ItemType Directory -Path $backup -Force | Out-Null
   $programChanged = $true
-  foreach ($name in $oldOwned) {
-    if ([string]::IsNullOrWhiteSpace($name) -or $name -eq 'data' -or $name.Contains('\') -or $name.Contains('/')) { continue }
-    $item = Join-Path $target $name
-    if (Test-Path -LiteralPath $item) { Invoke-WithRetry "备份 $name" { Move-Item -LiteralPath $item -Destination $backup -Force -ErrorAction Stop } }
-  }
-  foreach ($name in $newOwned) {
-    Write-UpdateProgress 'installing' 52 '正在安装新版程序文件…'
-    $item = Join-Path $payload $name
-    if (-not (Test-Path -LiteralPath $item)) { throw "更新负载缺少：$name" }
-    Invoke-WithRetry "安装 $name" { Move-Item -LiteralPath $item -Destination $target -Force -ErrorAction Stop }
+  if ($packageKind -eq 'app') {
+    foreach ($relative in $appFiles) {
+      $current = Join-Path $target $relative
+      $saved = Join-Path $backup $relative
+      $savedParent = Split-Path -Parent $saved
+      New-Item -ItemType Directory -Path $savedParent -Force | Out-Null
+      if (Test-Path -LiteralPath $current) { Invoke-WithRetry "备份 $relative" { Move-Item -LiteralPath $current -Destination $saved -Force -ErrorAction Stop } }
+    }
+    foreach ($relative in $appFiles) {
+      Write-UpdateProgress 'installing' 52 '正在安装轻量应用更新…'
+      $item = Join-Path $payload $relative
+      $destination = Join-Path $target $relative
+      $destinationParent = Split-Path -Parent $destination
+      New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+      Invoke-WithRetry "安装 $relative" { Move-Item -LiteralPath $item -Destination $destination -Force -ErrorAction Stop }
+    }
+  } else {
+    foreach ($name in $oldOwned) {
+      if ([string]::IsNullOrWhiteSpace($name) -or $name -eq 'data' -or $name.Contains('\') -or $name.Contains('/')) { continue }
+      $item = Join-Path $target $name
+      if (Test-Path -LiteralPath $item) { Invoke-WithRetry "备份 $name" { Move-Item -LiteralPath $item -Destination $backup -Force -ErrorAction Stop } }
+    }
+    foreach ($name in $newOwned) {
+      Write-UpdateProgress 'installing' 52 '正在安装新版程序文件…'
+      $item = Join-Path $payload $name
+      if (-not (Test-Path -LiteralPath $item)) { throw "更新负载缺少：$name" }
+      Invoke-WithRetry "安装 $name" { Move-Item -LiteralPath $item -Destination $target -Force -ErrorAction Stop }
+    }
   }
   if (-not (Test-Path -LiteralPath $exe)) { throw '更新后主程序不存在' }
   if (Test-Path -LiteralPath $health) { Remove-Item -LiteralPath $health -Force }

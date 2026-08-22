@@ -29,7 +29,7 @@ function runPowerShell(scriptPath) {
   })
 }
 
-async function runScenario(name, simulateCleanupLock) {
+async function runScenario(name, simulateCleanupLock, packageKind = 'full') {
   const scenarioRoot = path.join(temporaryRoot, name)
   const target = path.join(scenarioRoot, 'install')
   const updatesRoot = path.join(target, 'data', 'updates', version)
@@ -38,7 +38,17 @@ async function runScenario(name, simulateCleanupLock) {
 
   await fsp.cp(source, target, { recursive: true })
   await fsp.mkdir(payload, { recursive: true })
-  await fsp.cp(source, payload, { recursive: true })
+  if (packageKind === 'app') {
+    await fsp.mkdir(path.join(payload, 'resources'), { recursive: true })
+    await fsp.copyFile(path.join(source, 'resources', 'app.asar'), path.join(payload, 'resources', 'app.asar'))
+    await fsp.copyFile(path.join(source, 'starbrowser-update.json'), path.join(payload, 'starbrowser-update.json'))
+    // Ensure this is a real ASAR replacement, not a no-op copy of identical
+    // files. The staged package remains valid while the simulated installed
+    // app contains a different old payload.
+    await fsp.writeFile(path.join(target, 'resources', 'app.asar'), 'simulated-old-app-asar', 'utf8')
+  } else {
+    await fsp.cp(source, payload, { recursive: true })
+  }
   await fsp.mkdir(path.join(target, 'data'), { recursive: true })
   await fsp.writeFile(path.join(target, 'data', 'sentinel.txt'), 'data-must-survive', 'utf8')
   await fsp.writeFile(path.join(target, 'user-export.sbsession'), 'user-file-must-survive', 'utf8')
@@ -46,7 +56,7 @@ async function runScenario(name, simulateCleanupLock) {
   const newManifest = parseProgramManifest(JSON.parse(await fsp.readFile(path.join(payload, 'starbrowser-update.json'), 'utf8')))
   let script = buildApplyUpdatePowerShell({
     targetRoot: target, payloadRoot: payload, updatesRoot, mainPid: 999999,
-    token, oldOwnedTopLevel: oldManifest.ownedTopLevel, newOwnedTopLevel: newManifest.ownedTopLevel,
+    token, oldOwnedTopLevel: oldManifest.ownedTopLevel, newOwnedTopLevel: newManifest.ownedTopLevel, packageKind,
   })
   if (simulateCleanupLock) {
     const cleanupCommand = "Invoke-WithRetry '清理更新临时目录' { Remove-Item -LiteralPath $updates -Recurse -Force -ErrorAction Stop }"
@@ -60,6 +70,13 @@ async function runScenario(name, simulateCleanupLock) {
   const sentinel = await fsp.readFile(path.join(target, 'data', 'sentinel.txt'), 'utf8')
   const userExport = await fsp.readFile(path.join(target, 'user-export.sbsession'), 'utf8')
   if (installed.version !== version || sentinel !== 'data-must-survive' || userExport !== 'user-file-must-survive') throw new Error(`${name} 更新后校验失败`)
+  if (packageKind === 'app') {
+    const [expectedAsar, installedAsar] = await Promise.all([
+      fsp.readFile(path.join(source, 'resources', 'app.asar')),
+      fsp.readFile(path.join(target, 'resources', 'app.asar')),
+    ])
+    if (!expectedAsar.equals(installedAsar)) throw new Error(`${name} 未正确替换 app.asar`)
+  }
   if (fs.existsSync(path.join(target, 'data', 'update-error.log'))) throw new Error(`${name} 健康新版被错误标记为更新失败`)
   const cleanupLog = path.join(target, 'data', 'update-cleanup-pending.log')
   if (simulateCleanupLock) {
@@ -69,6 +86,7 @@ async function runScenario(name, simulateCleanupLock) {
   }
   return {
     name,
+    packageKind,
     installedVersion: installed.version,
     dataPreserved: true,
     cleanupDeferredWithoutRollback: simulateCleanupLock,
@@ -78,7 +96,9 @@ async function runScenario(name, simulateCleanupLock) {
 try {
   const normal = await runScenario('normal-cleanup', false)
   const locked = await runScenario('locked-asar-cleanup', true)
-  console.log(JSON.stringify({ ok: true, version, scenarios: [normal, locked] }, null, 2))
+  const lite = await runScenario('lightweight-app-update', false, 'app')
+  const liteLocked = await runScenario('lightweight-locked-cleanup', true, 'app')
+  console.log(JSON.stringify({ ok: true, version, scenarios: [normal, locked, lite, liteLocked] }, null, 2))
 } finally {
   await new Promise((resolve) => setTimeout(resolve, 800))
   await fsp.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })

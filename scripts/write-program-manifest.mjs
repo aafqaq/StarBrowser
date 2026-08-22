@@ -2,6 +2,7 @@ import { readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import packageJson from '../package.json' with { type: 'json' }
+import { createRuntimeId } from '../main/update-service.mjs'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const distRoot = path.join(projectRoot, 'dist')
@@ -16,8 +17,9 @@ const ownedTopLevel = distEntries
 ownedTopLevel.push('starbrowser-update.json')
 
 const manifest = {
-  manifestVersion: 1,
+  manifestVersion: 2,
   version: packageJson.version,
+  runtimeId: createRuntimeId(packageJson.devDependencies.electron, 'win32', 'x64'),
   ownedTopLevel,
 }
 await writeFile(path.join(distRoot, 'starbrowser-update.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')

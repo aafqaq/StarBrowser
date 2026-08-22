@@ -77,6 +77,7 @@ export interface UpdateStatus {
     publishedAt: string
     releaseUrl: string
     size: number
+    packageKind: 'app' | 'full'
     compatibility: {
       stateSchemaVersion?: number
       storageSchemaVersion?: number
