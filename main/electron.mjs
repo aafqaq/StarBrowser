@@ -383,6 +383,35 @@ async function exportSessionArchive(sessionId, password) {
   }
 }
 
+function partitionStoragePath(sessionId) {
+  const partitionName = partitionFor(sessionId).replace(/^persist:/, '')
+  return path.join(app.getPath('sessionData'), 'Partitions', partitionName)
+}
+
+async function installImportedStorage(targetId, archivePath, password) {
+  const stagingRoot = path.join(dataRoot, 'transfer-import')
+  const stagingPath = path.join(stagingRoot, targetId)
+  const targetPath = partitionStoragePath(targetId)
+  await fsp.rm(stagingPath, { recursive: true, force: true })
+  await fsp.mkdir(stagingPath, { recursive: true })
+  try {
+    const result = await runTransferWorker({ operation: 'import', archivePath, storagePath: stagingPath, password })
+    if (fs.existsSync(targetPath)) {
+      const error = new Error('无法创建全新的会话存储目录，请重试')
+      error.code = 'IMPORT_TARGET_EXISTS'
+      throw error
+    }
+    await fsp.mkdir(path.dirname(targetPath), { recursive: true })
+    await fsp.rename(stagingPath, targetPath)
+    await fsp.rmdir(stagingRoot).catch(() => {})
+    return { result, storagePath: targetPath }
+  } catch (error) {
+    await fsp.rm(stagingPath, { recursive: true, force: true }).catch(() => {})
+    await fsp.rmdir(stagingRoot).catch(() => {})
+    throw error
+  }
+}
+
 async function importSessionArchive(password) {
   if (typeof password !== 'string' || password.length < 8) return { ok: false, error: '导入密码至少需要 8 个字符' }
   const selection = await dialog.showOpenDialog(mainWindow, {
@@ -392,19 +421,21 @@ async function importSessionArchive(password) {
   })
   if (selection.canceled || !selection.filePaths[0]) return { ok: false, canceled: true }
   const targetId = id()
-  const targetSession = configureSession(targetId)
+  let targetSession = null
+  let installedStoragePath = ''
   try {
-    await targetSession.clearStorageData()
-    const storagePath = targetSession.getStoragePath()
-    if (!storagePath) return { ok: false, error: '无法创建会话存储目录' }
-    const result = await runTransferWorker({ operation: 'import', archivePath: selection.filePaths[0], storagePath, password })
-    await importCookies(targetSession, result.payload.cookies)
+    const installed = await installImportedStorage(targetId, selection.filePaths[0], password)
+    const result = installed.result
+    installedStoragePath = installed.storagePath
     const nextSession = importedSession(result.payload.session)
     nextSession.id = targetId
     nextSession.profileName = `session_${targetId}`
+    targetSession = configureSession(targetId)
+    await importCookies(targetSession, result.payload.cookies)
     return { ok: true, session: nextSession, stats: { storageBytes: result.storageBytes, fileCount: result.fileCount, cookieCount: result.payload.cookies?.length || 0, formatVersion: result.formatVersion, algorithmVersion: result.algorithmVersion } }
   } catch (error) {
-    await Promise.allSettled([targetSession.clearStorageData(), targetSession.clearCache()])
+    if (targetSession) await Promise.allSettled([targetSession.clearStorageData(), targetSession.clearCache()])
+    else if (installedStoragePath) await fsp.rm(installedStoragePath, { recursive: true, force: true }).catch(() => {})
     return { ok: false, error: error?.message || String(error), code: error?.code }
   }
 }
@@ -1205,11 +1236,12 @@ async function runReadmeCapture() {
 async function runTransferSmokeCheck() {
   const smokeRoot = path.join(dataRoot, 'transfer-smoke')
   const sourceStorage = path.join(smokeRoot, 'source')
-  const restoredStorage = path.join(smokeRoot, 'restored')
   const archivePath = path.join(smokeRoot, 'sample.sbsession')
   await fsp.mkdir(path.join(sourceStorage, 'Local Storage'), { recursive: true })
+  await fsp.mkdir(path.join(sourceStorage, 'WebStorage'), { recursive: true })
   await fsp.mkdir(path.join(sourceStorage, 'Cache'), { recursive: true })
   await fsp.writeFile(path.join(sourceStorage, 'Local Storage', 'credential.ldb'), 'credential-token', 'utf8')
+  await fsp.writeFile(path.join(sourceStorage, 'WebStorage', 'QuotaManager'), 'chromium-quota-database', 'utf8')
   await fsp.writeFile(path.join(sourceStorage, 'Cache', 'must-not-export.cache'), 'cache-data', 'utf8')
   const exported = await runTransferWorker({
     operation: 'export',
@@ -1219,23 +1251,33 @@ async function runTransferSmokeCheck() {
     session: { name: '加密会话测试', tabs: [{ id: 'tab-1', title: '测试', url: 'https://example.com/' }], activeTabId: 'tab-1' },
     cookies: [{ name: 'token', value: 'secret', domain: 'example.com', path: '/', secure: true }],
   })
-  const imported = await runTransferWorker({ operation: 'import', archivePath, storagePath: restoredStorage, password: 'starbrowser-smoke-password' })
+  const importedId = `transfer_smoke_${id()}`
+  const installed = await installImportedStorage(importedId, archivePath, 'starbrowser-smoke-password')
+  const imported = installed.result
   let wrongPasswordRejected = false
+  const wrongPasswordId = `transfer_wrong_${id()}`
   try {
-    await runTransferWorker({ operation: 'import', archivePath, storagePath: path.join(smokeRoot, 'wrong-password'), password: 'wrong-password' })
+    await installImportedStorage(wrongPasswordId, archivePath, 'wrong-password')
   } catch (error) {
     wrongPasswordRejected = error?.code === 'WRONG_PASSWORD_OR_CORRUPT'
   }
-  const credentialRestored = await fsp.readFile(path.join(restoredStorage, 'Local Storage', 'credential.ldb'), 'utf8').catch(() => '')
-  const cacheExcluded = !fs.existsSync(path.join(restoredStorage, 'Cache', 'must-not-export.cache'))
+  const credentialRestored = await fsp.readFile(path.join(installed.storagePath, 'Local Storage', 'credential.ldb'), 'utf8').catch(() => '')
+  const quotaManagerRestored = await fsp.readFile(path.join(installed.storagePath, 'WebStorage', 'QuotaManager'), 'utf8').catch(() => '')
+  const cacheExcluded = !fs.existsSync(path.join(installed.storagePath, 'Cache', 'must-not-export.cache'))
+  const failedImportClean = !fs.existsSync(partitionStoragePath(wrongPasswordId)) && !fs.existsSync(path.join(dataRoot, 'transfer-import'))
+  const importedPartition = configureSession(importedId)
+  const configuredAfterRestore = path.resolve(importedPartition.getStoragePath() || '') === path.resolve(installed.storagePath)
   return {
     formatVersion: exported.formatVersion,
     algorithmVersion: exported.algorithmVersion,
     sessionName: imported.payload.session.name,
     cookieCount: imported.payload.cookies.length,
     credentialRestored: credentialRestored === 'credential-token',
+    quotaManagerRestored: quotaManagerRestored === 'chromium-quota-database',
+    configuredAfterRestore,
     cacheExcluded,
     wrongPasswordRejected,
+    failedImportClean,
   }
 }
 
@@ -1651,7 +1693,7 @@ async function runSmokeCheck() {
       performancePolicy.fixedUnderCritical && performancePolicy.criticalRuntimeBudget === 1 && performancePolicy.constrainedRuntimeBudget === 5 && performancePolicy.memoryCappedBudget <= 2 &&
       performancePolicy.recommendedTier === 'balanced' && performancePolicy.lowVisualMode && performancePolicy.restoredMode &&
       transferArchive.formatVersion === 1 && transferArchive.algorithmVersion === 1 && transferArchive.sessionName === '加密会话测试' &&
-      transferArchive.cookieCount === 1 && transferArchive.credentialRestored && transferArchive.cacheExcluded && transferArchive.wrongPasswordRejected &&
+      transferArchive.cookieCount === 1 && transferArchive.credentialRestored && transferArchive.quotaManagerRestored && transferArchive.configuredAfterRestore && transferArchive.cacheExcluded && transferArchive.wrongPasswordRejected && transferArchive.failedImportClean &&
       report.browser.guestIdStable && report.browser.videoSurfaceRemainedLive && report.browser.guestContextMenuReady && report.browser.rendererContextMenuReady && report.browser.spellcheckDisabled && !report.windowWasVisible
     )
   } catch (error) {

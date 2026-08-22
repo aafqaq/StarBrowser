@@ -2470,7 +2470,7 @@ onBeforeUnmount(() => {
             <p class="form-hint">关闭标签或会话才会释放对应浏览器进程。若页面进程真实崩溃，标签会保留并提示，只有你点击标签或刷新时才显式恢复；Cookie、本地存储、IndexedDB 与登录信息始终保存在隔离数据目录。</p>
             <div class="settings-update-card">
               <span class="settings-update-icon"><n-icon><RocketOutline /></n-icon></span>
-              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.8' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
+              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.9' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
               <n-button size="small" secondary @click="openGithubProject"><template #icon><n-icon><StarOutline /></n-icon></template>GitHub</n-button>
               <n-button size="small" type="primary" :loading="updateInfo.phase === 'checking'" @click="checkForUpdatesManually">检查更新</n-button>
             </div>

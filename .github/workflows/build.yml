@@ -51,6 +51,9 @@ jobs:
       - name: Build portable Windows folder
         run: npm run dist
 
+      - name: Test packaged session import and browser lifecycle
+        run: npm run test:smoke
+
       - name: Test portable updater handoff and locked ASAR cleanup
         run: npm run test:update:integration
 
