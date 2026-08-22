@@ -197,6 +197,10 @@ function transformedOutput(definition, context, now) {
     const value = Number(source)
     return Number.isFinite(value) ? value : undefined
   }
+  if (definition.transform === 'nonnegative-integer') {
+    const value = Number(source)
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined
+  }
   if (definition.transform === 'lowercase') return String(source).toLowerCase()
   if (definition.transform === 'remaining-percent') {
     const value = Number(source)

@@ -27,7 +27,7 @@ declare global {
       reorderTabs(fromIndex: number, toIndex: number): boolean
       targetTabIndex(floatingLeft: number, listLeft: number, slotWidth: number, tabCount: number): number
       mixedWidthTabCrossingCheck(): { browserCanLeadMemo: boolean; memoCanFollowBrowser: boolean }
-      pluginBadgeRulesCheck(): { types: string[]; freshCycleHidden: boolean; usedCycleVisible: boolean }
+      pluginBadgeRulesCheck(): { types: string[]; freshCycleHidden: boolean; usedCycleVisible: boolean; reserveSuffix: string; zeroReserveSuffix: string }
       getHeaderOrder(): string[]
       reorderHeaderItems(fromIndex: number, toIndex: number): boolean
       memoRoundTrip(): Promise<{ before: number; during: number; after: number; retained: boolean; layout: { editorHeight: number; wrapperHeight: number; textareaHeight: number; aligned: boolean } }>

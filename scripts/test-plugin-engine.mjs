@@ -29,7 +29,11 @@ const service = new PluginService({
   getSession: () => ({
     fetch: async (url) => String(url).includes('/api/auth/session')
       ? response({ accessToken: 'test-token', user: { plan_type: 'plus' } })
-      : response({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 37, reset_after_seconds: 7200 } } }),
+      : response({
+          plan_type: 'plus',
+          rate_limit: { primary_window: { used_percent: 37, reset_after_seconds: 7200 } },
+          rate_limit_reset_credits: { available_count: 2 },
+        }),
   }),
   notify: () => {},
 })
@@ -45,6 +49,7 @@ try {
   assert.equal(publicState.installed.length, 1)
   assert.equal(publicState.results['chatgpt-usage']['chatgpt-session'].status, 'ok')
   assert.equal(publicState.results['chatgpt-usage']['chatgpt-session'].fields.remainingPercent, 63)
+  assert.equal(publicState.results['chatgpt-usage']['chatgpt-session'].fields.reserveCount, 2)
   assert.match(String(publicState.results['chatgpt-usage']['chatgpt-session'].fields.resetAt), /^\d{4}-\d{2}-\d{2}T/)
 
   await service.updateConfig('chatgpt-usage', { updateMode: 'interval', intervalHours: 12 })

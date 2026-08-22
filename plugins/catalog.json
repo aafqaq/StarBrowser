@@ -3,13 +3,13 @@
   "plugins": [
     {
       "id": "chatgpt-usage",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "name": "ChatGPT 用量展示",
-      "description": "显示非免费 ChatGPT 账号的剩余用量与重置时间，不打开额外网页。",
+      "description": "显示非免费 ChatGPT 账号的剩余用量、重置时间和银行重置卡数量，不打开额外网页。",
       "publisher": "StarBrowser",
       "icon": "chatgpt",
       "manifestUrl": "https://raw.githubusercontent.com/aafqaq/StarBrowser/main/plugins/chatgpt-usage/plugin.json",
-      "sha256": "f9295cf28c09dca896262df44dddf57003890bf3979eea30f4930005c72f3c01"
+      "sha256": "65fe5812dc81c4b98eb397282bcf73993fa8b6a6324659a12a914559beec92ac"
     }
   ]
 }

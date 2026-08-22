@@ -1640,7 +1640,7 @@ async function runSmokeCheck() {
       inputLayer.afterSwitch.allHitsActiveWebview && inputLayer.afterSwitch.onlyOneInputView && inputLayer.afterSwitch.backgroundViewsNonInteractive && inputLayer.switchedGuest &&
       memoAndChrome.roundTrip?.retained && memoAndChrome.roundTrip?.layout?.aligned && memoAndChrome.memoMoved && memoAndChrome.browserChanged && memoAndChrome.browserCanLeadMemo && memoAndChrome.nativeDragRegion &&
       favoritesUi.visible && favoritesUi.contentPane && favoritesUi.singlePane && favoritesUi.noFolderControls && favoritesUi.flatData &&
-      pluginUi.visible && pluginUi.tabs && pluginUi.importReady && pluginUi.declarativeSafety && pluginUi.availableFieldRemoved && pluginUi.iconConsistent && JSON.stringify(pluginUi.badgeRules?.types) === JSON.stringify(['success', 'info', 'warning', 'error']) && pluginUi.badgeRules?.freshCycleHidden && pluginUi.badgeRules?.usedCycleVisible &&
+      pluginUi.visible && pluginUi.tabs && pluginUi.importReady && pluginUi.declarativeSafety && pluginUi.availableFieldRemoved && pluginUi.iconConsistent && JSON.stringify(pluginUi.badgeRules?.types) === JSON.stringify(['success', 'info', 'warning', 'error']) && pluginUi.badgeRules?.freshCycleHidden && pluginUi.badgeRules?.usedCycleVisible && pluginUi.badgeRules?.reserveSuffix === '2天重置+3' && pluginUi.badgeRules?.zeroReserveSuffix === '2天重置' &&
       recycleOverlay.visible && recycleOverlay.completeText && recycleOverlay.insideViewport && recycleOverlay.teleported &&
       updateUi.visible && updateUi.insideViewport && updateUi.versionShown && updateUi.actionsShown && updateUi.safetyShown && updateUi.progressReady &&
       activationStability.guestStable && activationStability.navigationStable &&

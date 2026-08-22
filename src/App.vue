@@ -1292,6 +1292,18 @@ function nestedValue(value: unknown, dottedPath: string) {
   }, value)
 }
 
+function appendPluginBadgeValue(
+  label: string,
+  definition: InstalledPlugin['sessionBadges'][number],
+  result: PluginEngineState['results'][string][string],
+) {
+  if (!definition.appendField || !definition.appendFormat) return label
+  const value = result.fields[definition.appendField]
+  if (value === undefined || value === null || value === '') return label
+  if (definition.appendWhen === 'positive' && (!Number.isFinite(Number(value)) || Number(value) <= 0)) return label
+  return `${label}${definition.appendFormat.replace('{value}', String(value))}`
+}
+
 function sessionPluginBadges(session: BrowserSession) {
   const badges: Array<{ key: string; label: string; type: 'default' | 'success' | 'warning' | 'error' | 'info'; title: string }> = []
   for (const plugin of pluginState.value.installed) {
@@ -1304,6 +1316,7 @@ function sessionPluginBadges(session: BrowserSession) {
       let label = definition.label || ''
       if (definition.format === 'reset-distance') label = resetDistanceLabel(fieldValue)
       else if (definition.format) label = definition.format.replace('{value}', String(fieldValue ?? ''))
+      label = appendPluginBadgeValue(label, definition, result)
       if (!label) continue
       badges.push({
         key: `${plugin.id}:${index}`,
@@ -1714,11 +1727,18 @@ onMounted(async () => {
           ],
         }
         const resetDefinition: InstalledPlugin['sessionBadges'][number] = { whenStatus: 'ok', visibleWhen: { field: 'remainingPercent', operator: 'lt', value: 100 } }
+        const reserveDefinition: InstalledPlugin['sessionBadges'][number] = {
+          whenStatus: 'ok', field: 'resetAt', format: 'reset-distance',
+          appendField: 'reserveCount', appendFormat: '+{value}', appendWhen: 'positive',
+        }
         const result = (remainingPercent: number) => ({ status: 'ok' as const, fields: { remainingPercent }, checkedAt: '', error: null })
+        const reserveResult = (reserveCount: number) => ({ status: 'ok' as const, fields: { reserveCount }, checkedAt: '', error: null })
         return {
           types: [90, 60, 25, 5].map((value) => pluginBadgeType(definition, value)),
           freshCycleHidden: !pluginBadgeVisible(resetDefinition, result(100)),
           usedCycleVisible: pluginBadgeVisible(resetDefinition, result(99.9)),
+          reserveSuffix: appendPluginBadgeValue('2天重置', reserveDefinition, reserveResult(3)),
+          zeroReserveSuffix: appendPluginBadgeValue('2天重置', reserveDefinition, reserveResult(0)),
         }
       },
       getHeaderOrder: () => headerItems.value.map((item) => item.id),
@@ -2450,7 +2470,7 @@ onBeforeUnmount(() => {
             <p class="form-hint">关闭标签或会话才会释放对应浏览器进程。若页面进程真实崩溃，标签会保留并提示，只有你点击标签或刷新时才显式恢复；Cookie、本地存储、IndexedDB 与登录信息始终保存在隔离数据目录。</p>
             <div class="settings-update-card">
               <span class="settings-update-icon"><n-icon><RocketOutline /></n-icon></span>
-              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.7' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
+              <div><strong>StarBrowser v{{ updateInfo.currentVersion || '1.8.8' }}</strong><small>启动时会在后台检查更新；喜欢这个项目，可以去 GitHub 点个 Star。</small></div>
               <n-button size="small" secondary @click="openGithubProject"><template #icon><n-icon><StarOutline /></n-icon></template>GitHub</n-button>
               <n-button size="small" type="primary" :loading="updateInfo.phase === 'checking'" @click="checkForUpdatesManually">检查更新</n-button>
             </div>

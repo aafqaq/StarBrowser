@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "id": "chatgpt-usage",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "name": "ChatGPT 用量展示",
-  "description": "自动识别打开过 chatgpt.com 的隔离会话，不创建网页标签，直接使用该会话的登录凭证读取非免费账号用量与重置时间。",
+  "description": "自动识别打开过 chatgpt.com 的隔离会话，不创建网页标签，直接使用该会话的登录凭证读取非免费账号用量、重置时间与银行重置卡数量。",
   "publisher": "StarBrowser",
   "homepage": "https://github.com/aafqaq/StarBrowser/tree/main/plugins/chatgpt-usage",
   "icon": "chatgpt",
@@ -77,6 +77,9 @@
         "whenStatus": "ok",
         "field": "resetAt",
         "format": "reset-distance",
+        "appendField": "reserveCount",
+        "appendFormat": "+{value}",
+        "appendWhen": "positive",
         "type": "info",
         "visibleWhen": { "field": "remainingPercent", "operator": "lt", "value": 100 }
       },
@@ -155,6 +158,23 @@
             "steps.usage.body.rate_limit.primary_window.resetAfterSeconds"
           ],
           "transform": "seconds-from-now-to-iso"
+        },
+        {
+          "key": "reserveCount",
+          "sources": [
+            "steps.usage.body.rate_limit_reset_credits.available_count",
+            "steps.usage.body.rate_limit_reset_credits.availableCount",
+            "steps.usage.body.rateLimitResetCredits.available_count",
+            "steps.usage.body.rateLimitResetCredits.availableCount",
+            "steps.usage.body.gpt_reserve.available_count",
+            "steps.usage.body.gpt_reserve.availableCount",
+            "steps.usage.body.gpt-reserve.available_count",
+            "steps.usage.body.gpt-reserve.availableCount",
+            "steps.usage.body.gpt_reserve",
+            "steps.usage.body.gptReserve",
+            "steps.usage.body.gpt-reserve"
+          ],
+          "transform": "nonnegative-integer"
         }
       ],
       "classify": [

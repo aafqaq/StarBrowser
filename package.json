@@ -1,6 +1,6 @@
 {
   "name": "starbrowser3",
-  "version": "1.8.7",
+  "version": "1.8.8",
   "description": "便携式会话隔离浏览器",
   "type": "module",
   "main": "main/electron.mjs",

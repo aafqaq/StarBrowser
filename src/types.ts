@@ -126,6 +126,9 @@ export interface InstalledPlugin extends PluginCatalogEntry {
     label?: string
     field?: string
     format?: string
+    appendField?: string
+    appendFormat?: string
+    appendWhen?: 'present' | 'positive'
     type?: 'default' | 'success' | 'warning' | 'error' | 'info'
     typeThresholds?: Array<{ minimum: number; type: 'default' | 'success' | 'warning' | 'error' | 'info' }>
     visibleWhen?: { field: string; operator: 'lt' | 'lte' | 'gt' | 'gte' | 'eq'; value: number }
