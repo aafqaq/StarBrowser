@@ -533,7 +533,7 @@ export class PluginService {
       const response = await this.getSession(browserSession.id).fetch(url.toString(), {
         method: 'GET', headers, credentials: 'include', redirect: 'follow', signal: controller.signal,
       })
-      if (response.status === 401) throw new PluginEngineError('not-logged-in', 'ChatGPT 会话未登录或登录已失效')
+      if (response.status === 401) throw new PluginEngineError('not-logged-in', '目标网站会话未登录或登录已失效')
       if (response.status === 403) throw new PluginEngineError('account-restricted', '账号无权访问用量信息或账号状态异常')
       if (response.status === 404) throw new PluginEngineError('endpoint-unavailable', '用量接口暂不可用，可能已发生变化')
       if (response.status === 429) throw new PluginEngineError('temporarily-limited', '请求过于频繁，请稍后重试')
@@ -569,9 +569,6 @@ export class PluginService {
       if (value !== undefined) fields[output.key] = value
     }
     const classification = classifyResult(manifest, fields)
-    if (classification.status === 'ok' && !Number.isFinite(Number(fields.remainingPercent))) {
-      throw new PluginEngineError('invalid-response', '未找到可识别的非免费账号用量信息')
-    }
     return { status: classification.status, message: classification.message, fields, checkedAt: new Date(now).toISOString(), error: null }
   }
 

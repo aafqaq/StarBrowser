@@ -54,4 +54,4 @@ StarBrowser 插件是 JSON 数据，不是可执行代码。插件引擎负责�
 }
 ```
 
-完整实现可参考 [`chatgpt-usage/plugin.json`](chatgpt-usage/plugin.json)。新增或更新插件后，需要同步修改目录版本与清单 SHA-256。
+插件引擎的测试示例见 [`scripts/test-plugin-engine.mjs`](../scripts/test-plugin-engine.mjs)。新增或更新目录条目时，需要同步修改版本与清单 SHA-256。

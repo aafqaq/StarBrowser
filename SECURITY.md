@@ -12,5 +12,5 @@ StarBrowser 不提供云同步，也不会把会话、Cookie、备注、收藏�
 
 ## 报告问题
 
-请通过 [GitHub Issues](https://github.com/aafqaq/StarBrowser/issues) 报告安全问题。提交截图或日志前，请先移除账号、Cookie、网址、会话名称等私人信息。
+普通问题请通过 [GitHub Issues](https://github.com/aafqaq/StarBrowser/issues) 报告。安全漏洞优先使用仓库 Security → Report a vulnerability（若已启用）；否则先提交不包含漏洞细节的 Issue，请维护者提供私密报告渠道。不要公开可利用细节、Cookie、登录令牌或会话包。提交截图或日志前，请移除账号、网址、会话名称等私人信息。
 
