@@ -1,3 +1,5 @@
+[English](README.en.md) · 简体中文
+
 <p align="center">
   <img src="docs/banner.png" alt="StarBrowser — Windows 会话隔离浏览器，多账号独立登录" width="100%" />
 </p>
@@ -7,7 +9,7 @@
   <a href="https://github.com/aafqaq/StarBrowser/releases/latest"><img src="https://img.shields.io/badge/Download-Windows_x64-3388ff?style=flat-square&logo=windows11&logoColor=white" alt="下载 Windows x64" /></a>
   <a href="https://github.com/aafqaq/StarBrowser/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/aafqaq/StarBrowser/build.yml?branch=main&style=flat-square&label=Build" alt="Windows 构建状态" /></a>
   <a href="https://github.com/aafqaq/StarBrowser/stargazers"><img src="https://img.shields.io/github/stars/aafqaq/StarBrowser?style=flat-square&label=Stars&color=f5a623" alt="GitHub Stars" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Noncommercial-8256e8?style=flat-square" alt="非商业许可" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-8256e8?style=flat-square" alt="MIT 许可证" /></a>
 </p>
 
 <p align="center">
@@ -112,13 +114,11 @@ StarBrowser 启动后会异步检查 GitHub Releases，也可在 **设置 → �
 
 ## 使用许可
 
-StarBrowser 的原创代码、界面、文档和原创资源采用 [PolyForm Noncommercial 1.0.0](LICENSE)：
+StarBrowser 的原创代码、界面、文档和原创资源采用 [MIT 许可证](LICENSE)，允许商业使用、修改和分发，须保留版权及许可声明。第三方组件继续遵循各自许可证，详见 [第三方许可声明](THIRD_PARTY_NOTICES.md)。
 
-- 个人学习、研究、娱乐及其他非商业用途可免费使用、修改和分发。
-- 商业产品、收费服务、转售、变现分发或企业商业运营须事先取得作者书面授权。
-- Electron、Chromium、Vue、Naive UI 等第三方组件仍遵循各自许可证，详见 [第三方许可声明](THIRD_PARTY_NOTICES.md)。
+## 从源码构建与参与贡献
 
-商业授权请通过 [@aafqaq](https://github.com/aafqaq) 或 [Issues](https://github.com/aafqaq/StarBrowser/issues) 联系。
+开发环境、构建步骤和验证命令见 [开发指南](docs/DEVELOPMENT.md)。问题报告和 PR 流程见 [贡献指南](CONTRIBUTING.md)，安全报告见 [SECURITY.md](SECURITY.md)。
 
 ## 常见问题
 

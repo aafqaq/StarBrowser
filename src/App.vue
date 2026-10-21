@@ -2019,7 +2019,7 @@ onMounted(async () => {
         await nextTick()
         const card = document.querySelector<HTMLElement>('[data-testid="plugins-modal"]')
         const rect = card?.getBoundingClientRect()
-        return Boolean(card && rect && rect.width > 650 && rect.height > 400 && card.textContent?.includes('ChatGPT 用量展示'))
+        return Boolean(card && rect && rect.width > 650 && rect.height > 400 && card.textContent?.includes('插件'))
       },
       activateTabAt: async (index) => {
         const tab = activeSession.value?.tabs[index]
